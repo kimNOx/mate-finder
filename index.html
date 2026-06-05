@@ -3290,6 +3290,18 @@ function fbConfirm() {
   onResolved();
 }
 
+// ── MM:SS 파싱 헬퍼 ─────────────────────────────────────────
+function parseMMSS(str) {
+  if (!str) return NaN;
+  str = str.trim();
+  if (str.includes(':')) {
+    const [m, s] = str.split(':').map(Number);
+    if (!isFinite(m) || !isFinite(s) || s < 0 || s >= 60) return NaN;
+    return m + s / 60;
+  }
+  return parseFloat(str);
+}
+
 function fbValidate() {
   const raw   = document.getElementById('fbInput').value;
   const msg   = document.getElementById('fbValMsg');
@@ -4211,6 +4223,38 @@ function updateHudUnit() {
   else if (displayCat === 'run')  el.textContent = 'min/km';
   else                            el.textContent = '';
 }
+// ── 페이스 변환 헬퍼 ─────────────────────────────────────────
+// 초/km → "M'SS\"/km" 표시
+function secToPaceStr(sec) {
+  if (!sec || sec <= 0) return '—';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}'${String(s).padStart(2,'0')}"/km`;
+}
+// min/km 소수 → "M:SS"
+function toMMSS(minKm) {
+  const m = Math.floor(minKm);
+  const s = Math.round((minKm - m) * 60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+// "M:SS" 또는 소수 → min/km 소수
+// 초/km → 등급명
+function runGrade(paceSec, l) {
+  l = l || lang;
+  if (!paceSec || paceSec <= 0) return null;
+  if (l === 'ko') {
+    if (paceSec < 210) return '엘리트';
+    if (paceSec < 270) return '상급';
+    if (paceSec < 330) return '중급';
+    return '입문';
+  } else {
+    if (paceSec < 210) return 'Elite';
+    if (paceSec < 270) return 'Advanced';
+    if (paceSec < 330) return 'Intermediate';
+    return 'Beginner';
+  }
+}
+
 function onResolved() {
   try {
   const s = globalResult?.score;
