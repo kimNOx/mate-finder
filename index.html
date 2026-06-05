@@ -1,0 +1,4320 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mate finder</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp }                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getAuth, createUserWithEmailAndPassword,
+         signInWithEmailAndPassword, signOut,
+         onAuthStateChanged, updateProfile }       from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getFirestore, collection, doc, addDoc,
+         setDoc, getDoc, getDocs, deleteDoc,
+         onSnapshot, query, orderBy, where,
+         serverTimestamp, updateDoc, arrayUnion,
+         arrayRemove }                             from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyDzzg0sDOxqMihoTUR-SROpk2zH4C0OE_M",
+  authDomain:        "mate-finder-87506.firebaseapp.com",
+  projectId:         "mate-finder-87506",
+  storageBucket:     "mate-finder-87506.firebasestorage.app",
+  messagingSenderId: "755290190948",
+  appId:             "1:755290190948:web:86fa153a63763b59729b71",
+};
+
+const fbApp  = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDb   = getFirestore(fbApp);
+
+// ── 전역 노출 ─────────────────────────────────────────────────
+window._fbAuth = fbAuth;
+window._fbDb   = fbDb;
+window._fb     = {
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, updateProfile,
+  collection, doc, addDoc, setDoc, getDoc, getDocs,
+  deleteDoc, onSnapshot, query, orderBy, where,
+  serverTimestamp, updateDoc, arrayUnion, arrayRemove,
+};
+
+// ── 닉네임 중복 확인 ─────────────────────────────────────────
+async function nickExists(nick) {
+  const q = query(collection(fbDb, 'users'), where('nickname', '==', nick));
+  const snap = await getDocs(q);
+  return !snap.empty;
+}
+
+// ── 회원가입 ─────────────────────────────────────────────────
+window.doSignup = async function() {
+  const email = document.getElementById('suEmail').value.trim();
+  const nick  = document.getElementById('suNick').value.trim();
+  const pw    = document.getElementById('suPw').value;
+  const btn   = document.getElementById('suSubmit');
+  const msgEl = document.getElementById('suNickMsg');
+  btn.disabled = true;
+  btn.textContent = '가입 중...';
+  try {
+    // 닉네임 중복 확인
+    if (await nickExists(nick)) {
+      document.getElementById('suNick').className = 'af-input err';
+      msgEl.className = 'af-msg err';
+      msgEl.textContent = '이미 사용 중인 닉네임입니다';
+      btn.disabled = false; btn.textContent = '가입하기'; return;
+    }
+    // 1) Auth 계정 생성
+    const cred = await createUserWithEmailAndPassword(fbAuth, email, pw);
+    // 2) 토큰 강제 갱신
+    await cred.user.getIdToken(true);
+    // 3) displayName 설정
+    await updateProfile(cred.user, { displayName: nick });
+    // 4) Firestore 프로필 저장
+    await setDoc(doc(fbDb, 'users', cred.user.uid), {
+      uid: cred.user.uid, email, nickname: nick,
+      joinedAt: serverTimestamp(),
+    });
+    // onAuthStateChanged → onLoginSuccess 호출됨
+  } catch(e) {
+    console.error('[doSignup]', e.code, e.message);
+    const errMsg = document.getElementById('suEmailMsg');
+    errMsg.className = 'af-msg err';
+    errMsg.textContent =
+      e.code === 'auth/email-already-in-use' ? '이미 사용 중인 이메일입니다' :
+      e.code === 'auth/weak-password'         ? '비밀번호 6자 이상 입력해주세요' :
+      e.code === 'auth/invalid-email'         ? '올바른 이메일 형식이 아닙니다' :
+      e.message;
+    btn.disabled = false; btn.textContent = '가입하기';
+  }
+};
+
+// ── 로그인 ───────────────────────────────────────────────────
+window.doLogin = async function() {
+  const email = document.getElementById('liEmail').value.trim();
+  const pw    = document.getElementById('liPw').value;
+  const btn   = document.getElementById('liSubmit');
+  const msg   = document.getElementById('liPwMsg');
+  btn.disabled = true; btn.textContent = '로그인 중...';
+  try {
+    await signInWithEmailAndPassword(fbAuth, email, pw);
+    // onAuthStateChanged → onLoginSuccess 호출됨
+  } catch(e) {
+    console.error('[doLogin]', e.code);
+    msg.className = 'af-msg err';
+    msg.textContent = '이메일 또는 비밀번호가 올바르지 않습니다';
+    document.getElementById('liPw').className = 'af-input err';
+    btn.disabled = false; btn.textContent = '로그인';
+  }
+};
+
+// ── 로그아웃 ─────────────────────────────────────────────────
+window.doLogout = async function() {
+  if (!confirm('로그아웃 하시겠어요?')) return;
+  if (window._meetingsUnsub) { window._meetingsUnsub(); window._meetingsUnsub = null; }
+  await signOut(fbAuth);
+  location.reload();   // 가장 깔끔한 초기화
+};
+
+// ── 모임 저장 ────────────────────────────────────────────────
+window._firestoreSubmitCreate = async function(data) {
+  await addDoc(collection(fbDb, 'meetings'), {
+    ...data,
+    createdAt: serverTimestamp(),
+  });
+};
+
+// ── Auth 상태 감지 ───────────────────────────────────────────
+onAuthStateChanged(fbAuth, async (user) => {
+  if (!user) return;
+  try {
+    let nickname = user.displayName;
+    if (!nickname) {
+      const snap = await getDoc(doc(fbDb, 'users', user.uid));
+      nickname = snap.exists() ? snap.data().nickname : user.email.split('@')[0];
+    }
+    const userData = { id: user.uid, email: user.email, nickname };
+    if (typeof window.onLoginSuccess === 'function') {
+      window.onLoginSuccess(userData);
+    } else {
+      window._pendingAuthUser = userData;
+    }
+  } catch(e) {
+    console.error('[onAuthStateChanged]', e);
+  }
+});
+
+// ── Firestore 모임 실시간 리스너 ─────────────────────────────
+window._startMeetingsListener = function() {
+  if (window._meetingsUnsub) window._meetingsUnsub();
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const q = query(
+    collection(fbDb, 'meetings'),
+    where('departAt', '>', cutoff),
+    orderBy('departAt', 'asc')
+  );
+  window._meetingsUnsub = onSnapshot(q, (snap) => {
+    window.MEETINGS = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id:           d.id,
+        title:        data.title        ?? '',
+        cat:          data.cat          ?? 'run',
+        coord:        data.coord        ?? [37.535, 127.010],
+        distKm:       data.distKm       ?? 0,
+        route:        data.route        ?? '',
+        departAt:     data.departAt     ?? Date.now(),
+        maxP:         data.maxP         ?? 8,
+        participants: (data.participantUids ?? []).length,
+        joinedUsers:  new Set(data.participantUids ?? []),
+        endedUsers:   new Set(data.endedUids ?? []),
+        host: {
+          id:    data.hostUid   ?? '',
+          name:  data.hostName  ?? '',
+          score: data.hostScore ?? 0,
+          cat:   data.hostCat   ?? 'run',
+        },
+      };
+    });
+    // 무지개 핀: 친구 캐시 갱신 후 마커 렌더
+    if (typeof window.FriendStore !== 'undefined' && window.FriendStore.refresh) {
+      window.FriendStore.refresh().then(() => {
+        if (typeof window.buildMarkers === 'function') window.buildMarkers();
+        if (typeof window._checkEmptyState === 'function') window._checkEmptyState();
+      });
+    } else {
+      if (typeof window.buildMarkers === 'function') window.buildMarkers();
+      if (typeof window._checkEmptyState === 'function') window._checkEmptyState();
+    }
+  }, err => console.error('[meetings listener]', err));
+};
+</script>
+<style>
+:root{
+  --bg:#0a0d0f;--surface:#111518;--s2:#181d22;--border:#1e262f;
+  --accent:#00f5a0;--a2:#00b4ff;--warn:#ffd166;
+  --red:#ff4d6d;--yellow:#ffd166;--green:#06d6a0;--gray:#4a5568;
+  --text:#dde6f0;--muted:#4a5568;
+  --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden;}
+
+/* ─── MAP ─────────────────────────────────── */
+#map{position:fixed;inset:0;z-index:0;}
+.leaflet-container{background:#0d1117!important;}
+.leaflet-tile-pane{filter:brightness(.48) saturate(.35) hue-rotate(190deg);}
+.leaflet-control-zoom{border:1px solid var(--border)!important;border-radius:10px!important;overflow:hidden;box-shadow:none!important;}
+.leaflet-control-zoom a{background:rgba(10,13,15,.92)!important;color:var(--text)!important;border-bottom:1px solid var(--border)!important;line-height:26px!important;}
+.leaflet-control-zoom a:hover{background:var(--s2)!important;color:var(--accent)!important;}
+.leaflet-control-attribution{background:rgba(10,13,15,.7)!important;color:var(--muted)!important;font-size:8px!important;}
+.leaflet-control-attribution a{color:var(--muted)!important;}
+
+/* ─── HUD ─────────────────────────────────── */
+.hud{position:fixed;top:0;left:0;right:0;z-index:500;
+  display:flex;align-items:center;gap:12px;padding:12px 18px;
+  background:linear-gradient(180deg,rgba(10,13,15,.96) 0%,transparent 100%);
+  pointer-events:none;}
+.hud>*{pointer-events:all;}
+.logo{display:flex;align-items:center;gap:9px;}
+.logo-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),var(--a2));
+  border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;
+  box-shadow:0 0 14px rgba(0,245,160,.35);}
+.logo-name{font-size:17px;font-weight:800;letter-spacing:-.3px;}
+.hud-gap{flex:1;}
+/* score-pill + user-chip 한 행 묶음 */
+.hud-right{display:flex;align-items:center;gap:8px;pointer-events:all;}
+.score-pill{display:flex;align-items:center;gap:8px;
+  background:rgba(10,13,15,.88);border:1px solid var(--border);
+  border-radius:22px;padding:7px 14px;backdrop-filter:blur(12px);cursor:pointer;}
+.score-pill:hover{border-color:rgba(0,245,160,.3);}
+.sp-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:1.5px;}
+.sp-val{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);}
+.sp-badge{font-family:var(--mono);font-size:9px;padding:2px 8px;border-radius:10px;
+  background:rgba(0,245,160,.1);border:1px solid rgba(0,245,160,.2);color:var(--accent);}
+.sp-badge.warn{background:rgba(255,209,102,.1);border-color:rgba(255,209,102,.25);color:var(--warn);}
+.sp-badge.manual{background:rgba(0,180,255,.1);border-color:rgba(0,180,255,.25);color:var(--a2);}
+.lang-toggle{background:rgba(10,13,15,.88);border:1px solid var(--border);border-radius:18px;
+  padding:6px 4px;display:flex;gap:2px;backdrop-filter:blur(12px);}
+.lb{font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 11px;border-radius:14px;
+  cursor:pointer;border:none;background:transparent;color:var(--muted);transition:all .2s;}
+.lb.on{background:var(--accent);color:#000;}
+/* user-chip: 데스크톱에서 score-pill 바로 옆 */
+.user-chip{display:none;align-items:center;gap:7px;
+  background:rgba(10,13,15,.88);border:1px solid var(--border);
+  border-radius:22px;padding:6px 12px;backdrop-filter:blur(12px);cursor:pointer;}
+.user-chip:hover{border-color:rgba(0,245,160,.3);}
+.uc-av{width:22px;height:22px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  display:flex;align-items:center;justify-content:center;font-size:12px;}
+.uc-name{font-family:var(--mono);font-size:11px;font-weight:600;}
+.uc-logout{font-family:var(--mono);font-size:9px;color:var(--muted);}
+
+/* ─── FAB ─────────────────────────────────── */
+.fab{position:fixed;right:20px;bottom:100px;z-index:500;
+  width:52px;height:52px;border-radius:16px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  display:flex;align-items:center;justify-content:center;font-size:22px;
+  box-shadow:0 4px 20px rgba(0,245,160,.4);transition:transform .15s, right .32s cubic-bezier(.34,1.05,.64,1);}
+.fab:hover{transform:scale(1.08);}
+.fab:active{transform:scale(.95);}
+
+/* ─── LEGEND ──────────────────────────────── */
+.legend{position:fixed;left:16px;bottom:16px;z-index:500;
+  background:rgba(10,13,15,.92);border:1px solid var(--border);border-radius:12px;
+  padding:12px 14px;backdrop-filter:blur(16px);min-width:188px;}
+.leg-title{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:1.5px;margin-bottom:9px;}
+.leg-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);}
+.leg-row:last-child{border-bottom:none;}
+.leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.leg-txt{font-family:var(--mono);font-size:10px;}
+.leg-sub{font-size:8px;color:var(--muted);}
+
+/* ─── TOAST ───────────────────────────────── */
+.toast{position:fixed;top:66px;left:50%;transform:translateX(-50%);
+  border-radius:18px;padding:7px 16px;font-family:var(--mono);font-size:11px;
+  white-space:nowrap;z-index:600;opacity:0;pointer-events:none;transition:opacity .35s;}
+.toast.warn{background:rgba(255,209,102,.12);border:1px solid rgba(255,209,102,.28);color:var(--warn);}
+.toast.info{background:rgba(0,180,255,.1);border:1px solid rgba(0,180,255,.28);color:var(--a2);}
+.toast.on{opacity:1;}
+
+/* ─── BOTTOM SHEET ────────────────────────── */
+.bs-back{position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);
+  z-index:600;opacity:0;pointer-events:none;transition:opacity .28s;}
+.bs-back.on{opacity:1;pointer-events:all;}
+.bs{position:fixed;bottom:0;left:0;right:0;z-index:700;
+  transform:translateY(100%);transition:transform .38s cubic-bezier(.34,1.1,.64,1);}
+.bs.on{transform:translateY(0);}
+.bs-inner{background:var(--surface);border-top:1px solid var(--border);
+  border-radius:22px 22px 0 0;padding:0 0 44px;box-shadow:0 -20px 60px rgba(0,0,0,.55);}
+.bs-handle{width:38px;height:4px;background:var(--border);border-radius:2px;
+  margin:13px auto 0;cursor:pointer;}
+.bs-body{padding:18px 22px 0;}
+
+/* departure banner */
+.dep-banner{display:flex;align-items:center;gap:10px;
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;margin-bottom:14px;font-family:var(--mono);font-size:11px;}
+.dep-icon{font-size:16px;flex-shrink:0;}
+.dep-time-lbl{color:var(--muted);font-size:9px;letter-spacing:1px;margin-bottom:2px;}
+.dep-time-val{color:var(--text);font-weight:600;}
+.dep-status{margin-left:auto;font-size:9px;padding:3px 9px;border-radius:8px;font-weight:600;}
+.dep-status.future{background:rgba(0,245,160,.1);color:var(--accent);}
+.dep-status.running{background:rgba(255,209,102,.15);color:var(--warn);}
+.dep-status.ended{background:rgba(74,85,104,.15);color:var(--muted);}
+
+/* host row */
+.host-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.av{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);
+  background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.host-name{font-size:15px;font-weight:700;}
+.sv-badge{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:8px;
+  background:rgba(252,82,0,.12);border:1px solid rgba(252,82,0,.25);color:#fc5200;
+  padding:2px 7px;border-radius:8px;margin-top:3px;}
+.host-score{text-align:right;font-family:var(--mono);}
+.host-score-lbl{font-size:8px;color:var(--muted);letter-spacing:1px;}
+.host-score-val{font-size:20px;font-weight:700;color:var(--a2);}
+.host-algo{font-size:8px;color:var(--muted);margin-top:2px;}
+
+/* course */
+.course-card{background:var(--s2);border:1px solid var(--border);border-radius:11px;padding:13px;margin-bottom:13px;}
+.course-title{font-size:13px;font-weight:700;margin-bottom:5px;}
+.course-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:7px;}
+.course-route{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.55;}
+.participants-bar{margin-top:8px;}
+.pb-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:4px;}
+.pb-track{background:var(--border);border-radius:4px;height:5px;overflow:hidden;}
+.pb-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--a2));transition:width .3s;}
+.pb-count{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;}
+
+/* diff badge */
+.diff-badge{display:flex;align-items:center;gap:11px;padding:11px 14px;
+  border-radius:11px;border:1px solid;margin-bottom:13px;}
+.diff-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+.diff-lbl{font-size:13px;font-weight:700;}
+.diff-adv{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:1px;}
+.diff-ratio{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:600;}
+
+/* algo badge */
+.algo-badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;
+  padding:2px 8px;border-radius:8px;background:rgba(0,180,255,.08);
+  border:1px solid rgba(0,180,255,.2);color:var(--a2);margin-bottom:10px;}
+
+/* action row */
+.action-row{display:flex;gap:10px;}
+.join-btn{flex:1;padding:14px;border:none;border-radius:12px;font-family:var(--sans);
+  font-size:15px;font-weight:700;cursor:pointer;transition:all .18s;}
+.join-btn:disabled{opacity:.35;cursor:not-allowed;}
+.end-btn{padding:14px 18px;border:1px solid var(--border);border-radius:12px;
+  background:rgba(255,77,109,.1);color:#ff4d6d;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
+.cancel-join-btn{
+  flex:1;padding:12px;border-radius:12px;border:1px solid rgba(255,209,102,.4);
+  background:rgba(255,209,102,.1);color:#ffd166;font-family:var(--mono);
+  font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;
+}
+.cancel-join-btn:hover{background:rgba(255,209,102,.2);}
+.delete-meet-btn{
+  flex:1;padding:12px;border-radius:12px;border:1px solid rgba(255,77,109,.4);
+  background:rgba(255,77,109,.1);color:#ff4d6d;font-family:var(--mono);
+  font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;
+}
+.delete-meet-btn:hover{background:rgba(255,77,109,.2);}
+  font-family:var(--sans);font-size:13px;font-weight:600;background:transparent;
+  color:var(--muted);cursor:pointer;transition:all .18s;white-space:nowrap;}
+.end-btn:hover{border-color:var(--warn);color:var(--warn);}
+.end-btn:disabled{opacity:.3;cursor:not-allowed;}
+
+/* ─── CREATE MODAL ────────────────────────── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);
+  z-index:900;display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .28s;}
+.modal-ov.on{opacity:1;pointer-events:all;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:18px;
+  padding:28px;width:min(460px,calc(100vw - 32px));max-height:90vh;overflow-y:auto;
+  position:relative;}
+.modal::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--accent),var(--a2));border-radius:18px 18px 0 0;}
+.modal-title{font-size:18px;font-weight:800;margin-bottom:20px;display:flex;align-items:center;gap:10px;}
+.field{margin-bottom:16px;}
+.field-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.2px;
+  text-transform:uppercase;margin-bottom:6px;}
+.field input,.field select,.field textarea{width:100%;background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:11px 14px;font-family:var(--mono);font-size:13px;color:var(--text);
+  outline:none;transition:border-color .2s;}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--a2);}
+.field select option{background:var(--s2);}
+.field textarea{resize:vertical;min-height:60px;line-height:1.5;}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.participants-ctrl{display:flex;align-items:center;gap:10px;}
+.pc-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);
+  background:var(--s2);color:var(--text);font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;}
+.pc-btn:hover{border-color:var(--accent);color:var(--accent);}
+.pc-val{font-family:var(--mono);font-size:18px;font-weight:700;min-width:32px;text-align:center;}
+.modal-btns{display:flex;gap:10px;margin-top:20px;}
+.btn-primary{flex:1;padding:13px;border:none;border-radius:11px;font-family:var(--sans);
+  font-size:14px;font-weight:700;background:linear-gradient(135deg,var(--accent),var(--a2));
+  color:#000;cursor:pointer;transition:opacity .18s;}
+.btn-primary:hover{opacity:.88;}
+.btn-cancel{padding:13px 18px;border:1px solid var(--border);border-radius:11px;
+  font-family:var(--sans);font-size:13px;font-weight:600;background:transparent;
+  color:var(--muted);cursor:pointer;}
+
+/* ─── FALLBACK MODAL ──────────────────────── */
+.fb-modal{background:var(--surface);border:1px solid var(--border);border-radius:18px;
+  padding:28px;width:min(440px,calc(100vw - 32px));position:relative;}
+.fb-modal::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--red),var(--warn));border-radius:18px 18px 0 0;}
+.fb-icon{font-size:32px;margin-bottom:12px;}
+.fb-title{font-size:17px;font-weight:800;margin-bottom:7px;}
+.fb-desc{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;margin-bottom:18px;}
+.score-input{width:100%;background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:13px 14px;font-family:var(--mono);font-size:17px;font-weight:600;color:var(--text);outline:none;}
+.score-input:focus{border-color:var(--a2);}
+.preset-row{display:flex;gap:7px;margin-top:8px;flex-wrap:wrap;}
+.preset{font-family:var(--mono);font-size:10px;padding:5px 12px;
+  background:var(--s2);border:1px solid var(--border);border-radius:7px;
+  color:var(--muted);cursor:pointer;transition:all .14s;}
+.preset:hover{border-color:var(--a2);color:var(--a2);}
+.val-msg{font-family:var(--mono);font-size:10px;margin-top:5px;min-height:14px;}
+.val-msg.ok{color:var(--accent);}
+.val-msg.err{color:var(--red);}
+
+/* custom pin animation */
+@keyframes pulse{
+  0%{transform:translateX(-50%) scale(.5);opacity:.7;}
+  100%{transform:translateX(-50%) scale(2.5);opacity:0;}
+}
+
+/* ─── AUTH SCREEN ─────────────────────────── */
+#authScreen{
+  position:fixed;inset:0;z-index:2000;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+#authScreen.hidden{display:none;}
+
+.auth-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:22px;padding:36px 32px;
+  width:min(420px,100%);position:relative;
+  box-shadow:0 24px 80px rgba(0,0,0,.6);
+}
+.auth-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--accent),var(--a2));
+  border-radius:22px 22px 0 0;
+}
+.auth-logo{display:flex;align-items:center;gap:11px;margin-bottom:28px;}
+.auth-logo-icon{
+  width:42px;height:42px;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  border-radius:12px;display:flex;align-items:center;justify-content:center;
+  font-size:20px;box-shadow:0 0 20px rgba(0,245,160,.3);
+}
+.auth-logo-name{font-size:22px;font-weight:800;letter-spacing:-.5px;}
+.auth-logo-sub{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.5px;}
+
+.auth-tabs{display:flex;gap:4px;background:var(--s2);border-radius:12px;padding:4px;margin-bottom:24px;}
+.auth-tab{
+  flex:1;padding:9px;border:none;border-radius:8px;
+  font-family:var(--sans);font-size:13px;font-weight:700;
+  cursor:pointer;background:transparent;color:var(--muted);transition:all .2s;
+}
+.auth-tab.on{background:var(--surface);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.4);}
+
+.auth-form{display:flex;flex-direction:column;gap:14px;}
+.auth-form.hidden{display:none;}
+
+.af-field{display:flex;flex-direction:column;gap:6px;}
+.af-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;}
+.af-input-wrap{position:relative;}
+.af-input{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  border-radius:11px;padding:13px 42px 13px 14px;
+  font-family:var(--mono);font-size:13px;color:var(--text);outline:none;
+  transition:border-color .2s;
+}
+.af-input:focus{border-color:var(--a2);}
+.af-input.ok{border-color:var(--accent);}
+.af-input.err{border-color:var(--red);}
+.af-icon{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+  font-size:14px;pointer-events:none;
+}
+.af-msg{font-family:var(--mono);font-size:10px;min-height:14px;margin-top:2px;}
+.af-msg.ok{color:var(--accent);}
+.af-msg.err{color:var(--red);}
+.af-msg.info{color:var(--a2);}
+
+.auth-submit{
+  width:100%;padding:14px;border:none;border-radius:12px;
+  font-family:var(--sans);font-size:15px;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  color:#000;cursor:pointer;transition:opacity .2s;margin-top:4px;
+}
+.auth-submit:hover{opacity:.88;}
+.auth-submit:disabled{opacity:.35;cursor:not-allowed;}
+
+.auth-divider{
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+}
+.auth-divider::before,.auth-divider::after{
+  content:'';flex:1;height:1px;background:var(--border);
+}
+
+.nickname-preview{
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:12px;
+}
+.np-avatar{
+  width:32px;height:32px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;flex-shrink:0;
+}
+.np-name{font-weight:600;color:var(--text);}
+.np-sub{font-size:9px;color:var(--muted);margin-top:1px;}
+
+/* HUD user chip */
+.user-chip{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(10,13,15,.88);border:1px solid var(--border);
+  border-radius:22px;padding:6px 14px 6px 8px;
+  backdrop-filter:blur(12px);cursor:pointer;transition:border-color .2s;
+}
+.user-chip:hover{border-color:rgba(0,245,160,.3);}
+.uc-av{
+  width:26px;height:26px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  display:flex;align-items:center;justify-content:center;font-size:12px;
+}
+.uc-name{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);}
+.uc-logout{font-family:var(--mono);font-size:9px;color:var(--muted);margin-left:4px;}
+
+/* map click hint banner */
+.map-hint{
+  position:fixed;top:66px;left:50%;transform:translateX(-50%);
+  background:rgba(0,180,255,.12);border:1px solid rgba(0,180,255,.3);
+  border-radius:18px;padding:8px 18px;font-family:var(--mono);font-size:11px;
+  color:var(--a2);white-space:nowrap;z-index:600;
+  opacity:0;pointer-events:none;transition:opacity .3s;
+}
+.map-hint.on{opacity:1;}
+
+/* create modal — location picked indicator */
+.loc-picked{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(0,245,160,.06);border:1px solid rgba(0,245,160,.2);
+  border-radius:10px;padding:10px 13px;
+  font-family:var(--mono);font-size:12px;color:var(--accent);
+}
+.loc-picked.empty{
+  background:var(--s2);border-color:var(--border);
+  color:#ffffff;font-size:12px;
+}
+
+/* ════════════════════════════════
+   데스크톱 (≥769px): 단일행 헤더
+   ════════════════════════════════ */
+@media (min-width: 769px) {
+  /* mobile-header를 데스크톱 HUD로 사용 */
+  .mobile-header{
+    position:fixed;top:0;left:0;right:0;z-index:500;
+    display:flex;flex-direction:row;align-items:center;
+    gap:12px;padding:12px 18px;
+    background:linear-gradient(180deg,rgba(10,13,15,.96) 0%,transparent 100%);
+    pointer-events:none;border:none;
+    max-width:none;overflow:visible;
+  }
+  .mobile-header > *{ pointer-events:all; }
+
+  /* 3행 구조 숨기고 단일행으로 */
+  .mh-row1,.mh-row2{ display:contents; } /* contents: 자식을 부모 flex에 직접 참여 */
+  .mh-row1 .hud-gap,.mh-row2 > .hud-gap{ display:none; }
+  /* display:contents일 때 pointer-events 명시 */
+  .mh-row2 .score-pill{ pointer-events:all; cursor:pointer; }
+  .mh-row2 .user-chip{ pointer-events:all; cursor:pointer; }
+
+  /* 반경바: fixed 독립 위치 */
+  .radius-bar{
+    position:fixed;top:66px;left:50%;transform:translateX(-50%);
+    z-index:500;display:flex;align-items:center;gap:6px;
+    background:rgba(10,13,15,.92);border:1px solid var(--border);
+    border-radius:22px;padding:6px 10px;backdrop-filter:blur(14px);
+    opacity:0;pointer-events:none;transition:opacity .3s;
+    width:auto;box-sizing:content-box;
+    border-top:none;
+  }
+  .radius-bar.on{opacity:1;pointer-events:all;}
+
+  /* hud-gap: logo와 score-pill 사이 공간 */
+  .hud-gap{ flex:1;display:block; }
+
+  /* 1행 border-bottom 제거 */
+  .mh-row1{ border-bottom:none !important; }
+  .mh-row2{ border-bottom:none !important; }
+
+  /* 데스크톱에서 score-pill 원래 크기 */
+  .mh-row2 .score-pill{
+    flex:none;max-width:none;
+    padding:7px 14px;
+  }
+  .mh-row2 .sp-val{ font-size:14px; }
+  .mh-row2 .sp-lbl{ font-size:8px; }
+}
+
+
+/* ════════════════════════════════════════════
+   MOBILE  ≤ 768px  —  3행 반응형 상단 헤더
+   1행: 로고 + mate finder + 언어선택
+   2행: Engine Score + 유저칩
+   3행: 반경 + 종목 필터
+   ════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* 모바일: 기존 독립 HUD 없음 (mobile-header가 대체) */
+  #desktopHud{ display:none !important; }
+
+  /* 헤더 컨테이너 */
+  .mobile-header{
+    position:fixed;top:0;left:0;right:0;z-index:600;
+    display:flex;flex-direction:column;
+    background:rgba(10,13,15,.97);
+    border-bottom:1px solid var(--border);
+    backdrop-filter:blur(16px);
+    max-width:100vw;overflow:hidden;
+  }
+
+  /* 공통 행 */
+  .mh-row{
+    display:flex;align-items:center;
+    width:100%;box-sizing:border-box;
+    padding:clamp(6px,1.8vw,10px) clamp(10px,3vw,16px);
+    gap:clamp(6px,2vw,12px);
+  }
+
+  /* 1행: 로고 + 언어 */
+  .mh-row1{
+    border-bottom:1px solid var(--border);
+    padding-top:clamp(8px,2.5vw,12px);
+    padding-bottom:clamp(6px,1.8vw,10px);
+  }
+  .mh-row1 .logo-icon{
+    width:clamp(22px,6vw,30px);height:clamp(22px,6vw,30px);
+    font-size:clamp(11px,3vw,15px);flex-shrink:0;
+  }
+  .mh-row1 .logo-name{
+    font-size:clamp(13px,4vw,17px);font-weight:800;white-space:nowrap;
+  }
+  .mh-row1 .hud-gap{flex:1;}
+  .mh-row1 .lang-toggle{
+    flex-shrink:0;
+    padding:clamp(3px,1vw,5px) clamp(2px,0.5vw,4px);
+  }
+  .mh-row1 .lb{
+    font-size:clamp(9px,2.5vw,11px);
+    padding:clamp(3px,1vw,4px) clamp(7px,2vw,10px);
+  }
+
+  /* 2행: Engine Score + 유저칩 */
+  .mh-row2{
+    border-bottom:1px solid var(--border);
+    padding-top:clamp(5px,1.5vw,8px);
+    padding-bottom:clamp(5px,1.5vw,8px);
+  }
+  .mh-row2 .score-pill{
+    flex:1;max-width:none;cursor:pointer;
+    padding:clamp(4px,1.2vw,7px) clamp(8px,2.5vw,12px);
+    gap:clamp(4px,1.2vw,8px);
+  }
+  .mh-row2 .sp-lbl{font-size:clamp(7px,2vw,9px);letter-spacing:.5px;white-space:nowrap;}
+  .mh-row2 .sp-val{font-size:clamp(12px,3.5vw,16px);white-space:nowrap;}
+  .mh-row2 .sp-badge{
+    font-size:clamp(7px,1.8vw,9px);
+    padding:2px clamp(4px,1.2vw,7px);white-space:nowrap;
+  }
+  .mh-row2 .user-chip{flex-shrink:0;}
+  .mh-row2 .uc-name{
+    max-width:clamp(50px,16vw,90px);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:clamp(9px,2.5vw,12px);
+  }
+  .uc-logout{display:none;}
+
+  /* 3행: 반경바 — 절대 position:static 유지 (데스크톱 fixed 오버라이드 방지) */
+  .radius-bar{
+    position:static !important;
+    transform:none !important;
+    top:auto !important; left:auto !important;
+    border-radius:0;border:none;
+    background:transparent;backdrop-filter:none;
+    padding:clamp(5px,1.5vw,8px) clamp(10px,3vw,16px);
+    width:100%;box-sizing:border-box;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    opacity:1;pointer-events:none;
+    flex-shrink:0;display:flex;
+    gap:clamp(4px,1.2vw,6px);align-items:center;
+  }
+  .radius-bar.on{opacity:1;pointer-events:all;}
+  .radius-bar::-webkit-scrollbar{display:none;}
+  .rb-lbl{font-size:clamp(8px,2.2vw,10px);white-space:nowrap;flex-shrink:0;}
+  .rb-btn{
+    padding:clamp(5px,1.4vw,7px) clamp(9px,2.5vw,13px);
+    font-size:clamp(10px,2.8vw,12px);flex-shrink:0;white-space:nowrap;
+  }
+  .cat-select{
+    font-size:clamp(10px,2.8vw,12px);
+    padding:clamp(5px,1.4vw,7px) clamp(22px,6vw,28px) clamp(5px,1.4vw,7px) clamp(7px,2vw,10px);
+    flex-shrink:0;
+  }
+
+  /* 지도 */
+  #map{top:var(--mh,130px);bottom:0;left:0;right:0;}
+  .toast,.map-hint{top:calc(var(--mh,130px) + 8px);}
+
+  /* 범례 */
+  .legend{
+    left:8px;bottom:8px;
+    padding:clamp(6px,2vw,10px);
+    min-width:clamp(140px,40vw,180px);
+    max-height:35vh;overflow-y:auto;
+  }
+  .leg-txt{font-size:clamp(8px,2.2vw,10px);}
+  .leg-sub{font-size:clamp(6px,1.8vw,8px);}
+
+  .fab{right:14px;bottom:clamp(70px,18vw,90px);}
+  .map-empty{top:calc(50% + var(--mh,130px) / 2);}
+  #friendsTab{top:auto;bottom:clamp(14px,4vw,20px);right:clamp(12px,4vw,18px);}
+}
+
+/* 초소형 (≤360px) */
+@media (max-width:360px){
+  .sp-badge{display:none !important;}
+}
+
+
+.radius-bar{
+  position:fixed;top:66px;left:50%;transform:translateX(-50%);
+  z-index:500;display:flex;align-items:center;gap:6px;
+  background:rgba(10,13,15,.92);border:1px solid var(--border);
+  border-radius:22px;padding:6px 10px;backdrop-filter:blur(14px);
+  opacity:0;pointer-events:none;transition:opacity .3s;
+}
+.radius-bar.on{opacity:1;pointer-events:all;}
+.rb-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);
+  letter-spacing:1px;padding:0 4px;white-space:nowrap;}
+.rb-btn{
+  font-family:var(--mono);font-size:11px;font-weight:600;
+  padding:5px 12px;border-radius:14px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);cursor:pointer;transition:all .18s;
+  white-space:nowrap;
+}
+.rb-btn:hover{border-color:var(--a2);color:var(--a2);}
+.rb-btn.on{background:var(--a2);border-color:var(--a2);color:#000;}
+
+/* 구분선 */
+.rb-divider{
+  width:1px;height:20px;background:var(--border);
+  margin:0 2px;flex-shrink:0;
+}
+
+/* 운동 종목 드롭박스 */
+.cat-select{
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  padding:5px 28px 5px 10px;border-radius:14px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text);cursor:pointer;
+  outline:none;
+  appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 9px center;
+  transition:border-color .18s,color .18s,background-color .18s;
+  white-space:nowrap;
+}
+.cat-select:hover{border-color:var(--a2);}
+.cat-select.ride-on{
+  border-color:#f9a825;color:#f9a825;
+  background-color:rgba(249,168,37,.08);
+}
+.cat-select.run-on{
+  border-color:var(--accent);color:var(--accent);
+  background-color:rgba(0,245,160,.08);
+}
+
+/* 내 위치 마커 pulse */
+.my-loc-dot{
+  width:16px;height:16px;border-radius:50%;
+  background:var(--a2);border:2px solid #fff;
+  box-shadow:0 0 0 0 rgba(0,180,255,.5);
+  animation:myLocPulse 2s ease-out infinite;
+}
+@keyframes myLocPulse{
+  0%  {box-shadow:0 0 0 0   rgba(0,180,255,.5);}
+  70% {box-shadow:0 0 0 12px rgba(0,180,255,0);}
+  100%{box-shadow:0 0 0 0   rgba(0,180,255,0);}
+}
+
+/* ─── FRIENDS PANEL ───────────────────────── */
+#friendsPanel{
+  position:fixed;top:0;right:0;bottom:0;
+  width:260px;z-index:800;
+  background:rgba(10,13,15,.96);
+  border-left:1px solid var(--border);
+  backdrop-filter:blur(18px);
+  display:flex;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .32s cubic-bezier(.34,1.05,.64,1);
+  pointer-events:none;
+}
+#friendsPanel.open{transform:translateX(0);pointer-events:all;}
+/* shift FAB left when panel opens */
+body.fp-open .fab{right:280px;}
+body.fp-open #chatPanel{right:260px;}
+
+/* toggle tab */
+#friendsTab{
+  position:fixed;right:0;top:50%;transform:translateY(-50%);
+  z-index:401;width:52px;height:144px;
+  background:rgba(10,13,15,.92);border:1px solid var(--border);
+  border-right:none;border-radius:10px 0 0 10px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:right .32s cubic-bezier(.34,1.05,.64,1),background .2s;
+  backdrop-filter:blur(12px);
+  writing-mode:vertical-rl;font-size:18px;font-family:var(--mono);
+  color:var(--muted);letter-spacing:1.5px;gap:0;
+  user-select:none;
+}
+#friendsTab:hover{background:var(--s2);color:var(--accent);}
+#friendsTab.open{right:260px;}
+.ft-icon{font-size:30px;writing-mode:horizontal-tb;margin-bottom:6px;}
+.ft-badge{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  background:var(--accent);color:#000;border-radius:99px;
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  padding:2px 6px;min-width:18px;text-align:center;
+  display:none;
+}
+.ft-badge.on{display:block;}
+
+/* ── 모바일 전체화면: 친구패널 + 채팅창 ─── */
+@media (max-width: 768px) {
+  #friendsTab{
+    top:auto;
+    bottom:16px;
+    transform:none;
+    writing-mode:horizontal-tb;
+    width:64px;height:64px;
+    border-radius:50%;
+    border:1px solid var(--border);
+    border-right:1px solid var(--border);
+    flex-direction:column;
+    font-size:10px;
+    letter-spacing:0;
+    right:16px;
+  }
+  #friendsTab.open{right:16px;}
+  .ft-icon{font-size:26px;margin-bottom:2px;}
+
+  /* 친구패널 전체화면 */
+  #friendsPanel{
+    top:0;left:0;right:0;bottom:0;
+    width:100%;
+    border-left:none;
+    z-index:900;
+  }
+
+  /* 채팅창: 모바일 전용 오버레이 방식 */
+  #chatPanel{
+    /* 위치: 화면 전체를 덮는 dimmed 오버레이 */
+    position:fixed !important;
+    inset:0 !important;               /* top/right/bottom/left 모두 0 */
+    width:100% !important;
+    height:100% !important;
+    max-height:100% !important;
+    border-radius:0 !important;
+    z-index:1000 !important;
+    background:rgba(0,0,0,0.6) !important;  /* 반투명 배경 */
+    display:flex !important;
+    align-items:flex-end !important;        /* 카드를 하단에 */
+    justify-content:center !important;
+    /* 숨김: opacity + pointer-events */
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease;
+    /* bottom/transform 리셋 */
+    bottom:0 !important;
+    transform:none !important;
+  }
+  #chatPanel.open{
+    opacity:1 !important;
+    pointer-events:all !important;
+  }
+
+  /* 채팅 카드: dvh 기반 — 키보드 올라와도 가시 영역 80% 초과 안 함 */
+  #chatInner{
+    width:92%;
+    height:80dvh;
+    max-height:80dvh;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px 16px 0 0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    box-shadow:0 -8px 40px rgba(0,0,0,.5);
+    transform:translateY(100%);
+    transition:transform .3s cubic-bezier(.34,1.05,.64,1),
+               height .15s ease, max-height .15s ease;
+  }
+  #chatPanel.open #chatInner{
+    transform:translateY(0);
+  }
+  /* 메시지 영역: 남은 공간 모두 차지하며 내부 스크롤 */
+  #chatPanel .cp-msgs{
+    flex:1 1 0;
+    min-height:0;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  /* 헤더 */
+  .cp-header{
+    border-radius:0 !important;
+    flex-shrink:0;
+    padding:14px 16px;
+  }
+
+  /* 닫기 버튼: 항상 우측 상단, 터치하기 좋게 */
+  .cp-close{
+    position:relative;
+    width:44px !important;
+    height:44px !important;
+    font-size:20px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    background:var(--s2) !important;
+    border:1px solid var(--border) !important;
+    border-radius:50% !important;
+    flex-shrink:0;
+  }
+
+  /* 메시지 영역: 내부 스크롤 */
+  .cp-msgs{
+    flex:1;
+    overflow-y:auto !important;
+    -webkit-overflow-scrolling:touch;
+    padding:16px;
+  }
+
+  /* 입력창 */
+  .cp-input-row{
+    flex-shrink:0;
+    padding:12px 16px;
+    padding-bottom:max(12px, env(safe-area-inset-bottom));
+  }
+}
+/* 데스크톱: mobile-panel-close 숨김 */
+.mobile-panel-close{
+  display:none;
+  align-items:center;justify-content:center;
+  width:36px;height:36px;border-radius:50%;
+  background:var(--s2);border:1px solid var(--border);
+  color:var(--text);font-size:18px;cursor:pointer;
+  margin-left:auto;flex-shrink:0;
+  transition:border-color .18s,color .18s;
+}
+.mobile-panel-close:hover{border-color:var(--accent);color:var(--accent);}
+
+/* panel header */
+.fp-header{
+  padding:16px 16px 10px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.fp-title{
+  font-size:13px;font-weight:800;margin-bottom:10px;
+  display:flex;align-items:center;gap:7px;
+}
+.fp-title-icon{font-size:16px;}
+
+/* search box */
+.fp-search{
+  display:flex;gap:6px;
+}
+.fp-input{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px;font-family:var(--mono);
+  font-size:11px;color:var(--text);outline:none;transition:border-color .2s;
+  min-width:0;
+}
+.fp-input:focus{border-color:var(--a2);}
+.fp-search-btn{
+  padding:8px 10px;border:none;border-radius:9px;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  color:#000;font-size:11px;font-weight:700;font-family:var(--mono);
+  transition:opacity .15s;white-space:nowrap;
+}
+.fp-search-btn:hover{opacity:.85;}
+.fp-search-result{
+  margin-top:8px;min-height:0;
+}
+.fp-result-row{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background:var(--s2);border:1px solid var(--border);border-radius:9px;
+  font-family:var(--mono);font-size:11px;
+}
+.fp-result-av{
+  width:28px;height:28px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;flex-shrink:0;
+}
+.fp-result-name{flex:1;font-weight:600;color:var(--text);}
+.fp-add-btn{
+  padding:4px 10px;border:none;border-radius:7px;cursor:pointer;
+  background:rgba(0,245,160,.15);border:1px solid rgba(0,245,160,.3);
+  color:var(--accent);font-size:10px;font-family:var(--mono);font-weight:600;
+  transition:all .15s;
+}
+.fp-add-btn:hover{background:rgba(0,245,160,.28);}
+.fp-add-btn:disabled{opacity:.4;cursor:not-allowed;}
+.fp-msg{font-family:var(--mono);font-size:10px;color:var(--muted);padding:6px 2px;}
+
+/* friends list area */
+.fp-list-wrap{
+  flex:1;overflow-y:auto;padding:10px 12px;
+}
+.fp-list-wrap::-webkit-scrollbar{width:3px;}
+.fp-list-wrap::-webkit-scrollbar-track{background:transparent;}
+.fp-list-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+.fp-section-lbl{
+  font-family:var(--mono);font-size:8px;color:var(--muted);
+  letter-spacing:1.5px;margin:6px 4px 8px;
+}
+.fp-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:30px 10px;color:var(--muted);
+  font-family:var(--mono);font-size:10px;text-align:center;line-height:1.6;
+}
+.fp-empty-icon{font-size:28px;}
+
+/* friend row */
+.friend-row{
+  display:flex;align-items:center;gap:9px;
+  padding:9px 10px;border-radius:10px;cursor:pointer;
+  transition:background .15s;margin-bottom:4px;
+  border:1px solid transparent;
+}
+.friend-row:hover{background:var(--s2);border-color:var(--border);}
+.friend-row.active{background:rgba(0,245,160,.07);border-color:rgba(0,245,160,.2);}
+.fr-av{
+  width:34px;height:34px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--a2),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  position:relative;
+}
+.fr-online{
+  position:absolute;bottom:1px;right:1px;
+  width:9px;height:9px;border-radius:50%;background:var(--accent);
+  border:2px solid var(--bg);
+}
+.fr-info{flex:1;min-width:0;}
+.fr-name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fr-sub{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:1px;}
+.fr-chat-dot{
+  width:7px;height:7px;border-radius:50%;background:var(--accent);
+  flex-shrink:0;display:none;
+}
+.fr-chat-dot.on{display:block;}
+.fr-remove-btn{
+  width:22px;height:22px;border-radius:6px;border:none;cursor:pointer;
+  background:transparent;color:var(--muted);font-size:13px;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;opacity:0;
+}
+.friend-row:hover .fr-remove-btn{opacity:1;}
+.fr-remove-btn:hover{background:rgba(255,77,109,.15);color:var(--red);}
+
+/* 서로 친구 */
+.fr-name-row{display:flex;align-items:center;gap:5px;min-width:0;}
+.fr-mutual-badge{
+  font-family:var(--mono);font-size:8px;font-weight:700;
+  padding:2px 6px;border-radius:8px;white-space:nowrap;flex-shrink:0;
+  background:rgba(0,245,160,.12);border:1px solid rgba(0,245,160,.3);
+  color:var(--accent);
+}
+.fr-mutual-dot{
+  position:absolute;bottom:1px;right:1px;
+  width:9px;height:9px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--bg);
+}
+.friend-row.mutual{
+  border-color:rgba(0,245,160,.15);
+}
+.friend-row.mutual:hover{
+  background:rgba(0,245,160,.06);border-color:rgba(0,245,160,.28);
+}
+
+/* ─── CHAT PANEL ──────────────────────────── */
+#chatPanel{
+  position:fixed;bottom:0;right:260px;
+  width:280px;z-index:402;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px 14px 0 0;
+  display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;
+  transform:translateY(20px);
+  transition:opacity .25s ease, transform .25s ease;
+  box-shadow:-4px 0 30px rgba(0,0,0,.4);
+  max-height:420px;
+}
+#chatPanel.open{
+  opacity:1;pointer-events:all;
+  transform:translateY(0);
+}
+/* 데스크톱: chatInner는 그냥 flex 컨테이너 */
+#chatInner{
+  display:flex;flex-direction:column;
+  flex:1;min-height:0;
+}
+
+.cp-header{
+  display:flex;align-items:center;gap:9px;
+  padding:11px 14px;border-bottom:1px solid var(--border);
+  cursor:pointer;flex-shrink:0;
+  background:var(--s2);border-radius:14px 14px 0 0;
+}
+.cp-av{
+  width:30px;height:30px;border-radius:50%;
+  background:linear-gradient(135deg,var(--a2),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;
+}
+.cp-name{flex:1;font-size:12px;font-weight:700;}
+.cp-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:2px;}
+.cp-close:hover{color:var(--text);}
+
+.cp-msgs{
+  flex:1;overflow-y:auto;padding:12px;
+  display:flex;flex-direction:column;gap:8px;
+  min-height:0;
+}
+.cp-msgs::-webkit-scrollbar{width:3px;}
+.cp-msgs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+.cp-msg{
+  max-width:80%;padding:7px 10px;border-radius:10px;
+  font-family:var(--mono);font-size:11px;line-height:1.5;word-break:break-word;
+}
+.cp-msg.me{
+  align-self:flex-end;
+  background:linear-gradient(135deg,rgba(0,245,160,.18),rgba(0,180,255,.15));
+  border:1px solid rgba(0,245,160,.25);color:var(--text);
+}
+.cp-msg.them{
+  align-self:flex-start;
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+}
+.cp-msg-time{font-size:8px;color:var(--muted);margin-top:2px;}
+.cp-date-divider{
+  align-self:center;font-family:var(--mono);font-size:8px;
+  color:var(--muted);padding:2px 0;
+}
+.cp-system{
+  align-self:center;font-family:var(--mono);font-size:9px;
+  color:var(--muted);font-style:italic;
+}
+
+.cp-input-row{
+  display:flex;gap:6px;padding:10px;
+  border-top:1px solid var(--border);flex-shrink:0;
+}
+.cp-input{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px;font-family:var(--mono);
+  font-size:11px;color:var(--text);outline:none;transition:border-color .2s;
+  resize:none;min-width:0;
+}
+.cp-input:focus{border-color:var(--a2);}
+.cp-send-btn{
+  padding:8px 11px;border:none;border-radius:9px;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--a2));
+  color:#000;font-size:13px;font-weight:700;transition:opacity .15s;
+  flex-shrink:0;
+}
+.cp-send-btn:hover{opacity:.85;}
+
+/* ─── ADD FRIEND from meeting sheet ─────── */
+.meeting-attendees{
+  margin-top:10px;padding:10px 14px;
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+}
+.ma-title{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.2px;margin-bottom:8px;}
+.ma-list{display:flex;flex-wrap:wrap;gap:6px;}
+.ma-chip{
+  display:flex;align-items:center;gap:5px;padding:4px 10px 4px 6px;
+  background:var(--surface);border:1px solid var(--border);border-radius:20px;
+  font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;
+}
+.ma-chip:hover{border-color:rgba(0,245,160,.4);background:rgba(0,245,160,.07);}
+.ma-chip.added{border-color:rgba(0,245,160,.3);color:var(--accent);background:rgba(0,245,160,.08);}
+.ma-chip-av{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,var(--a2),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:9px;}
+
+/* ─── 매너 온도 표시 ───────────────────────── */
+.manner-temp{
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  padding:2px 6px;border-radius:8px;
+  white-space:nowrap;flex-shrink:0;
+}
+.manner-temp.hot  { color:#ff6b2b;background:rgba(255,107,43,.12); }
+.manner-temp.warm { color:#ffd166;background:rgba(255,209,102,.12); }
+.manner-temp.cool { color:#00c8ff;background:rgba(0,200,255,.12); }
+.manner-temp.base { color:var(--accent);background:rgba(0,245,160,.1); }
+
+/* ─── 매너 평가 모달 ───────────────────────── */
+.manner-modal-ov{
+  position:fixed;inset:0;z-index:2000;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(8px);
+  display:flex;align-items:flex-end;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.manner-modal-ov.on{opacity:1;pointer-events:all;}
+.manner-modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  width:min(100%,520px);max-height:88vh;
+  overflow-y:auto;padding:24px 20px 36px;
+  display:flex;flex-direction:column;gap:16px;
+}
+.manner-modal h3{
+  font-family:var(--mono);font-size:14px;font-weight:800;
+  color:var(--accent);letter-spacing:1px;margin:0;
+}
+.manner-modal .mm-sub{
+  font-size:11px;color:var(--muted);margin-top:-10px;
+}
+.manner-person{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:14px;padding:14px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.manner-person-head{
+  display:flex;align-items:center;gap:10px;
+}
+.manner-person-av{
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(135deg,var(--a2),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:17px;
+  flex-shrink:0;
+}
+.manner-person-info{ flex:1; }
+.manner-person-name{
+  font-family:var(--mono);font-size:13px;font-weight:700;
+}
+.manner-person-temp{
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+}
+.manner-items{
+  display:flex;flex-direction:column;gap:6px;
+}
+.manner-item{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 12px;border-radius:10px;
+  background:var(--surface);border:1px solid var(--border);
+  cursor:pointer;transition:all .18s;user-select:none;
+}
+.manner-item:hover{ border-color:var(--accent); }
+.manner-item.selected.positive{
+  background:rgba(0,245,160,.08);border-color:var(--accent);
+}
+.manner-item.selected.negative{
+  background:rgba(255,77,109,.08);border-color:#ff4d6d;
+}
+.manner-item-icon{ font-size:18px;flex-shrink:0; }
+.manner-item-label{
+  flex:1;font-size:12px;font-weight:600;
+}
+.manner-item-delta{
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  flex-shrink:0;
+}
+.manner-item.selected.positive .manner-item-delta{ color:var(--accent); }
+.manner-item.selected.negative .manner-item-delta{ color:#ff4d6d; }
+.manner-submit-btn{
+  width:100%;padding:14px;border-radius:14px;
+  background:var(--accent);color:#000;
+  font-family:var(--mono);font-size:13px;font-weight:800;
+  border:none;cursor:pointer;transition:opacity .18s;
+}
+.manner-submit-btn:hover{ opacity:.88; }
+.manner-submit-btn:disabled{ opacity:.4;cursor:default; }
+
+/* ─── 친구패널 닫기 버튼 (항상 표시) ───── */
+.fp-close-btn{
+  margin-left:auto;
+  width:28px;height:28px;border-radius:50%;
+  background:var(--s2);border:1px solid var(--border);
+  color:var(--muted);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .18s,color .18s;flex-shrink:0;
+}
+.fp-close-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ─── 채팅 헤더 버튼 그룹 ──────────────── */
+.cp-header-btns{display:flex;align-items:center;gap:6px;margin-left:auto;}
+.cp-leave{
+  font-family:var(--mono);font-size:9px;font-weight:700;
+  padding:4px 9px;border-radius:8px;
+  background:rgba(255,59,48,.1);border:1px solid rgba(255,59,48,.3);
+  color:#ff3b30;cursor:pointer;transition:all .18s;white-space:nowrap;
+}
+.cp-leave:hover{background:rgba(255,59,48,.2);border-color:#ff3b30;}
+.cp-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:4px;}
+.cp-close:hover{color:var(--text);}
+
+/* ─── 첨부파일 UI ───────────────────────── */
+.attach-drop{
+  position:relative;
+  border:1.5px dashed var(--border);border-radius:10px;
+  padding:16px 14px;text-align:center;
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  cursor:pointer;transition:border-color .18s,background .18s;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+}
+.attach-drop:hover,.attach-drop.drag{
+  border-color:var(--accent);background:rgba(0,245,160,.04);color:var(--accent);
+}
+.attach-drop-icon{font-size:22px;}
+.attach-list{display:flex;flex-direction:column;gap:5px;margin-top:6px;}
+.attach-item{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:8px;
+  background:var(--s2);border:1px solid var(--border);
+  font-family:var(--mono);font-size:10px;
+}
+.attach-item-icon{font-size:14px;flex-shrink:0;}
+.attach-item-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.attach-item-size{color:var(--muted);flex-shrink:0;}
+.attach-item-del{
+  background:none;border:none;color:var(--muted);cursor:pointer;
+  font-size:12px;padding:0 2px;flex-shrink:0;
+}
+.attach-item-del:hover{color:#ff3b30;}
+
+/* ─── ENGINE SCORE TOOLTIP MODAL ──────── */
+.es-modal-ov{
+  position:fixed;inset:0;z-index:3000;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.es-modal-ov.on{opacity:1;pointer-events:all;}
+.es-modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:18px;padding:24px 22px 20px;width:min(92vw,420px);
+  max-height:85vh;overflow-y:auto;
+}
+.es-modal h3{font-family:var(--mono);font-size:13px;color:var(--accent);
+  margin:0 0 4px;letter-spacing:1px;}
+.es-modal .es-sub{font-size:11px;color:var(--muted);margin-bottom:16px;}
+.es-section{margin-bottom:14px;}
+.es-section-title{font-family:var(--mono);font-size:10px;font-weight:700;
+  color:var(--a2);letter-spacing:1.5px;margin-bottom:6px;
+  padding-bottom:4px;border-bottom:1px solid var(--border);}
+.es-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:7px;}
+.es-rank{font-family:var(--mono);font-size:10px;font-weight:700;
+  background:var(--s2);border:1px solid var(--border);border-radius:6px;
+  padding:2px 7px;white-space:nowrap;flex-shrink:0;}
+.es-desc{font-size:11px;color:var(--text);line-height:1.5;}
+.es-desc strong{color:var(--accent);}
+.es-close{
+  width:100%;margin-top:16px;padding:10px;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);cursor:pointer;
+  transition:border-color .18s;
+}
+.es-close:hover{border-color:var(--accent);}
+/* ? 버튼 */
+.sp-help{
+  width:16px;height:16px;border-radius:50%;
+  background:rgba(255,255,255,.08);border:1px solid var(--border);
+  font-size:9px;font-weight:700;color:var(--muted);
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  margin-left:4px;vertical-align:middle;transition:border-color .18s,color .18s;
+  flex-shrink:0;
+}
+.sp-help:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ─── EMPTY STATE (주변 모임 없음) ────── */
+.map-empty{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:450;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  opacity:0;transition:opacity .3s;
+}
+.map-empty.on{opacity:1;}
+.map-empty-icon{font-size:36px;}
+.map-empty-txt{font-family:var(--mono);font-size:12px;color:var(--muted);
+  text-align:center;line-height:1.6;white-space:pre-line;}
+.map-empty-btn{
+  pointer-events:all;
+  margin-top:4px;padding:8px 20px;
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  background:var(--accent);color:#000;border:none;border-radius:12px;
+  cursor:pointer;transition:opacity .18s;
+}
+.map-empty-btn:hover{opacity:.85;}
+
+/* ─── FALLBACK MODAL cat selector ─────── */
+.fb-cat-select{
+  width:100%;font-family:var(--mono);font-size:12px;font-weight:700;
+  padding:9px 32px 9px 12px;border-radius:10px;
+  border:1px solid var(--accent);
+  background:var(--s2);color:var(--accent);
+  cursor:pointer;outline:none;
+  appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2300f5a0'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;background-size:10px 6px;
+  transition:border-color .18s,color .18s;
+  margin-bottom:2px;
+}
+.fb-cat-select:hover{border-color:var(--a2);}
+.fb-cat-select.ride{
+  border-color:#f9a825;color:#f9a825;
+  background-color:var(--s2);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23f9a825'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  background-size:10px 6px;
+}
+/* preset 버튼: 2줄 래핑 가능하도록 너비 자동 */
+.preset{font-family:var(--mono);font-size:10px;padding:6px 10px;line-height:1.4;text-align:left;white-space:normal;}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH SCREEN ── -->
+<div id="authScreen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🏃</div>
+      <div>
+        <div class="auth-logo-name">mate finder</div>
+        <div class="auth-logo-sub">GPS · SOCIAL · FITNESS</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="auth-tabs">
+      <button class="auth-tab on" id="tabLogin"  onclick="switchTab('login')">로그인</button>
+      <button class="auth-tab"    id="tabSignup" onclick="switchTab('signup')">회원가입</button>
+    </div>
+
+    <!-- LOGIN FORM -->
+    <div class="auth-form" id="loginForm">
+      <div class="af-field">
+        <div class="af-lbl">이메일</div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="liEmail" type="email" placeholder="example@email.com" oninput="validateLoginEmail()">
+          <span class="af-icon" id="liEmailIcon"></span>
+        </div>
+        <div class="af-msg" id="liEmailMsg"></div>
+      </div>
+      <div class="af-field">
+        <div class="af-lbl">비밀번호</div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="liPw" type="password" placeholder="비밀번호 입력" oninput="validateLoginPw()">
+          <span class="af-icon">🔒</span>
+        </div>
+        <div class="af-msg" id="liPwMsg"></div>
+      </div>
+      <button class="auth-submit" id="liSubmit" onclick="doLogin()" disabled>로그인</button>
+    </div>
+
+    <!-- SIGNUP FORM -->
+    <div class="auth-form hidden" id="signupForm">
+      <div class="af-field">
+        <div class="af-lbl">이메일</div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="suEmail" type="email" placeholder="example@email.com" oninput="validateSuEmail()">
+          <span class="af-icon" id="suEmailIcon"></span>
+        </div>
+        <div class="af-msg" id="suEmailMsg"></div>
+      </div>
+      <div class="af-field">
+        <div class="af-lbl">닉네임 <span style="color:var(--muted);font-size:8px">(2~12자, 한글/영문/숫자)</span></div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="suNick" type="text" placeholder="예: 한강러너" maxlength="12" oninput="validateSuNick()">
+          <span class="af-icon" id="suNickIcon"></span>
+        </div>
+        <div class="af-msg" id="suNickMsg"></div>
+      </div>
+      <!-- Nickname preview -->
+      <div class="nickname-preview" id="nickPreview" style="display:none">
+        <div class="np-avatar" id="npAvatar">🏃</div>
+        <div>
+          <div class="np-name" id="npName">—</div>
+          <div class="np-sub">mate finder 닉네임 미리보기</div>
+        </div>
+      </div>
+      <div class="af-field">
+        <div class="af-lbl">비밀번호</div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="suPw" type="password" placeholder="8자 이상" oninput="validateSuPw()">
+          <span class="af-icon">🔒</span>
+        </div>
+        <div class="af-msg" id="suPwMsg"></div>
+      </div>
+      <div class="af-field">
+        <div class="af-lbl">비밀번호 확인</div>
+        <div class="af-input-wrap">
+          <input class="af-input" id="suPw2" type="password" placeholder="동일하게 입력" oninput="validateSuPw2()">
+          <span class="af-icon" id="suPw2Icon"></span>
+        </div>
+        <div class="af-msg" id="suPw2Msg"></div>
+      </div>
+      <button class="auth-submit" id="suSubmit" onclick="doSignup()" disabled>가입하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAP -->
+<div id="map"></div>
+
+<!-- ── FRIENDS TAB (toggle button) ── -->
+<div id="friendsTab" onclick="toggleFriendsPanel()">
+  <span class="ft-icon">👥</span>
+  <span class="ft-badge" id="friendsBadge">0</span>
+  <span id="friendsTabLbl">친구</span>
+</div>
+
+<!-- ── FRIENDS PANEL ── -->
+<div id="friendsPanel">
+  <div class="fp-header">
+    <div class="fp-title">
+      <span class="fp-title-icon">👥</span>
+      <span id="fpTitleLbl">친구 목록</span>
+      <button class="fp-close-btn" onclick="toggleFriendsPanel()" title="닫기">✕</button>
+    </div>
+    <div class="fp-search">
+      <input class="fp-input" id="fpSearchInput" placeholder="닉네임 검색..." oninput="fpOnInput()" onkeydown="if(event.key==='Enter')fpDoSearch()">
+      <button class="fp-search-btn" id="fpSearchBtn" onclick="fpDoSearch()">찾기</button>
+    </div>
+    <div class="fp-search-result" id="fpSearchResult"></div>
+  </div>
+  <div class="fp-list-wrap">
+    <div class="fp-empty" id="fpEmpty">
+      <div class="fp-empty-icon">🤝</div>
+      <div id="fpEmptyLbl">아직 친구가 없어요<br>닉네임으로 검색하거나<br>모임 참석자를 추가해보세요</div>
+    </div>
+    <div class="fp-section-lbl" id="fpSectionLbl" style="display:none">FRIENDS</div>
+    <div id="fpFriendsList"></div>
+  </div>
+</div>
+
+<!-- ── CHAT PANEL ── -->
+<div id="chatPanel">
+  <div id="chatInner">
+  <div class="cp-header">
+    <div class="cp-av" id="cpAv">😊</div>
+    <div class="cp-name" id="cpName">—</div>
+    <div class="cp-header-btns">
+      <button class="cp-leave" onclick="leaveChat(event)" id="cpLeaveBtn" title="나가기">나가기</button>
+      <button class="cp-close" onclick="closeChat(event)" title="닫기">✕</button>
+    </div>
+  </div>
+  <div class="cp-msgs" id="cpMsgs"></div>
+  <div class="cp-input-row">
+    <input class="cp-input" id="cpInput" placeholder="메시지 입력..." onkeydown="if(event.key==='Enter')cpSend()">
+    <button class="cp-send-btn" onclick="cpSend()">↑</button>
+  </div>
+  </div>
+</div>
+
+<!-- map click hint -->
+<div class="map-hint" id="mapHint">📍 지도를 클릭하여 모임 장소를 선택하세요</div>
+
+<!-- ══ MOBILE HEADER CONTAINER ══ -->
+<div class="mobile-header" id="mobileHeader">
+
+  <!-- 1행: 로고 + 언어 -->
+  <div class="mh-row mh-row1">
+    <div class="logo">
+      <div class="logo-icon">🏃</div>
+      <span class="logo-name">mate finder</span>
+    </div>
+    <div class="hud-gap"></div>
+    <div class="lang-toggle">
+      <button class="lb on" id="bKO" onclick="setLang('ko')">KO</button>
+      <button class="lb"    id="bEN" onclick="setLang('en')">EN</button>
+    </div>
+  </div>
+
+  <!-- 2행: Engine Score + 유저칩 -->
+  <div class="mh-row mh-row2">
+    <div class="score-pill" onclick="openFallback('edit')" title="점수 수정" style="flex:1;max-width:none;">
+      <div>
+        <div class="sp-lbl">ENGINE SCORE <span id="hudUnit" style="font-size:8px;opacity:.7;letter-spacing:.5px"></span>
+          <button class="sp-help" onclick="event.stopPropagation();openEsModal()" title="Engine Score 설명">?</button>
+        </div>
+        <div class="sp-val" id="hudScore">—</div>
+      </div>
+      <div class="sp-badge" id="hudBadge">계산중</div>
+    </div>
+    <div class="user-chip" id="userChip" style="display:none" onclick="doLogout()">
+      <div class="uc-av" id="ucAv">😊</div>
+      <span class="uc-name" id="ucName">—</span>
+      <span class="manner-temp base" id="ucTemp" style="display:none">36.5°</span>
+      <span class="uc-logout" id="ucLogoutLbl">로그아웃</span>
+    </div>
+  </div>
+
+  <!-- 3행: 반경 + 종목 필터 (로그인 후) -->
+  <div class="radius-bar" id="radiusBar">
+    <span class="rb-lbl" id="rbLbl">반경</span>
+    <button class="rb-btn"    data-km="5"    onclick="setRadius(5)">5km</button>
+    <button class="rb-btn"    data-km="10"   onclick="setRadius(10)">10km</button>
+    <button class="rb-btn on" data-km="30"   onclick="setRadius(30)">30km</button>
+    <button class="rb-btn"    data-km="0"    onclick="setRadius(0)" id="rbAllBtn">전체</button>
+    <div class="rb-divider"></div>
+    <select class="cat-select" id="catSelect" onchange="setCat(this.value)">
+      <option value="all" id="catOptAll">🏃🚴 전체</option>
+      <option value="run" id="catOptRun">🏃 러닝</option>
+      <option value="ride" id="catOptRide">🚴 라이딩</option>
+    </select>
+  </div>
+
+</div><!-- /mobile-header -->
+
+<!-- Toast -->
+<div class="toast warn" id="toastA"></div>
+<div class="toast info" id="toastB"></div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="leg-title">DIFFICULTY · 7 TIERS</div>
+  <div class="leg-row" style="background:linear-gradient(90deg,rgba(180,79,255,.08),transparent);border-radius:6px;margin-bottom:2px;">
+    <div class="leg-dot" style="background:linear-gradient(135deg,#ff2d55,#ffd166,#06d6a0,#b44fff);box-shadow:0 0 6px rgba(180,79,255,.6);width:11px;height:11px;"></div>
+    <div><div class="leg-txt" style="color:#b44fff" data-i18n="leg_mutual">🌈 서로 친구 모임</div><div class="leg-sub" data-i18n="leg_mutual_sub">1.5× 크기 · 무지개 핀</div></div>
+  </div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ff2d55;box-shadow:0 0 5px #ff2d55"></div><div><div class="leg-txt" style="color:#ff2d55" data-i18n="leg_t1">완전 오버페이스</div><div class="leg-sub">ratio &lt; 0.60</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ff6b2b;box-shadow:0 0 5px #ff6b2b"></div><div><div class="leg-txt" style="color:#ff6b2b" data-i18n="leg_t2">고난이도</div><div class="leg-sub">0.60 ~ 0.80</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ffd166;box-shadow:0 0 5px #ffd166"></div><div><div class="leg-txt" style="color:#ffd166" data-i18n="leg_t3">다소 어려움</div><div class="leg-sub">0.80 ~ 0.95</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#06d6a0;box-shadow:0 0 5px #06d6a0"></div><div><div class="leg-txt" style="color:#06d6a0" data-i18n="leg_t4">황금 매치 ✦</div><div class="leg-sub">0.95 ~ 1.05</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#00c8ff;box-shadow:0 0 5px #00c8ff"></div><div><div class="leg-txt" style="color:#00c8ff" data-i18n="leg_t5">여유 페이스</div><div class="leg-sub">1.05 ~ 1.20</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#4477ff;box-shadow:0 0 5px #4477ff"></div><div><div class="leg-txt" style="color:#4477ff" data-i18n="leg_t6">매우 여유</div><div class="leg-sub">1.20 ~ 1.50</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#b44fff;box-shadow:0 0 5px #b44fff"></div><div><div class="leg-txt" style="color:#b44fff" data-i18n="leg_t7">압도적 여유</div><div class="leg-sub">ratio &gt; 1.50</div></div></div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--gray)"></div><div><div class="leg-txt" style="color:var(--muted)" data-i18n="leg_gray">진행중 / 종료</div><div class="leg-sub" data-i18n="leg_gray_sub">출발 후 24h 소멸</div></div></div>
+</div>
+
+<!-- ── 매너 평가 모달 ── -->
+<div class="manner-modal-ov" id="mannerOv">
+  <div class="manner-modal">
+    <h3>⭐ 매너 평가</h3>
+    <div class="mm-sub" id="mannerSub">함께한 분들의 매너를 평가해주세요</div>
+    <div id="mannerPersonList"></div>
+    <button class="manner-submit-btn" id="mannerSubmitBtn" onclick="submitMannerReviews()">
+      평가 완료
+    </button>
+    <button class="btn-cancel" onclick="closeMannerModal()" style="width:100%;margin-top:8px">
+      나중에 하기
+    </button>
+  </div>
+</div>
+
+<!-- FAB create -->
+<button class="fab" onclick="openCreate()" title="모임 만들기">＋</button>
+
+<!-- ── 주변 모임 없음 빈 상태 ── -->
+<div class="map-empty" id="mapEmpty">
+  <div class="map-empty-icon">🔍</div>
+  <div class="map-empty-txt" id="mapEmptyTxt">현재 주변에 모임이 없어요\n직접 만들어보세요!</div>
+  <button class="map-empty-btn" onclick="openCreate()">+ 모임 만들기</button>
+</div>
+
+<!-- ── ENGINE SCORE 설명 모달 ── -->
+<div class="es-modal-ov" id="esModalOv" onclick="closeEsModal()">
+  <div class="es-modal" onclick="event.stopPropagation()">
+    <h3>⚡ ENGINE SCORE</h3>
+    <div class="es-sub" id="esModalSub">나의 실력 지수 · 모임 난이도 매칭 기준</div>
+
+    <div class="es-section">
+      <div class="es-section-title" id="esPri">🥇 우선순위</div>
+      <div class="es-row">
+        <span class="es-rank">1st</span>
+        <div class="es-desc" id="esPri1">수동 직접 입력 — HUD 점수 클릭 시 입력<br><strong>저장된 수동값이 최우선 적용됨</strong></div>
+      </div>
+      <div class="es-row">
+        <span class="es-rank">2nd</span>
+        <div class="es-desc" id="esPri2">스트라바 자동 계산 — 최근 5회 활동 평균<br><strong>수동값 없을 때 자동 적용</strong></div>
+      </div>
+      <div class="es-row">
+        <span class="es-rank">3rd</span>
+        <div class="es-desc" id="esPri3">구경 모드 — 점수 없이 지도 탐색만 가능<br><strong>마커 색상이 회색으로 표시됨</strong></div>
+      </div>
+    </div>
+
+    <div class="es-section">
+      <div class="es-section-title" id="esCalcTitle">🏃 러닝</div>
+      <div class="es-row">
+        <span class="es-rank">입력</span>
+        <div class="es-desc" id="esRunFormula">나의 <strong>최고 1km 페이스</strong>를 직접 입력<br>예: 4:30 → 4분 30초/km</div>
+      </div>
+      <div class="es-row">
+        <span class="es-rank">등급</span>
+        <div class="es-desc" id="esRunGradeTable">엘리트 &lt;3'30" / 상급 &lt;4'30" / 중급 &lt;5'30" / 입문 ≥5'30"</div>
+      </div>
+    </div>
+
+    <div class="es-section">
+      <div class="es-section-title" id="esRideTitle">🚴 라이딩</div>
+      <div class="es-row">
+        <span class="es-rank">입력</span>
+        <div class="es-desc" id="esRidePower">나의 <strong>FTP 기반 w/kg</strong>을 직접 입력<br>예: 3.2 → 3.2 w/kg</div>
+      </div>
+      <div class="es-row">
+        <span class="es-rank">등급</span>
+        <div class="es-desc" id="esRideCond">입문 &lt;2.5 / 중급 &lt;3.2 / 상급 &lt;4.2 / 엘리트 ≥4.2 w/kg</div>
+      </div>
+    </div>
+
+    <div class="es-section">
+      <div class="es-section-title" id="esMatchTitle">🎯 매칭 기준 (ratio)</div>
+      <div class="es-row">
+        <span class="es-rank" style="color:#06d6a0">황금</span>
+        <div class="es-desc" id="esMatchGold">나의 점수 ÷ 호스트 점수 = <strong>0.95 ~ 1.05</strong><br>가장 이상적인 페이스 매치</div>
+      </div>
+      <div class="es-row">
+        <span class="es-rank" style="color:#ff2d55">주의</span>
+        <div class="es-desc" id="esMatchWarn">ratio &lt; 0.60 → 완전 오버페이스<br>무리하게 따라가면 부상 위험</div>
+      </div>
+    </div>
+
+    <button class="es-close" onclick="closeEsModal()" id="esCloseBtn">확인</button>
+  </div>
+</div>
+
+<!-- ── BOTTOM SHEET ── -->
+<div class="bs-back" id="bsBack" onclick="closeBS()"></div>
+<div class="bs" id="bs">
+  <div class="bs-inner">
+    <div class="bs-handle" onclick="closeBS()"></div>
+    <div class="bs-body">
+      <!-- departure banner -->
+      <div class="dep-banner" id="depBanner">
+        <div class="dep-icon" id="depIcon">🕐</div>
+        <div>
+          <div class="dep-time-lbl" data-i18n="dep_lbl">출발 시간</div>
+          <div class="dep-time-val" id="depTimeVal">—</div>
+        </div>
+        <div class="dep-status" id="depStatus">—</div>
+      </div>
+      <!-- host row -->
+      <div class="host-row">
+        <div class="av" id="bsAv">👤</div>
+        <div style="flex:1">
+          <div class="host-name" id="bsHostName">—</div>
+          <div class="sv-badge"><span>⚡</span><span>Strava Verified</span></div>
+        </div>
+        <div class="host-score">
+          <div class="host-score-lbl" data-i18n="host_score_lbl">HOST SCORE</div>
+          <div class="host-score-val" id="bsHostScore">—</div>
+          <div class="host-algo" id="bsHostAlgo">—</div>
+        </div>
+      </div>
+      <!-- algo badge -->
+      <div class="algo-badge" id="bsAlgoBadge">⚙ ALGORITHM: —</div>
+      <!-- course -->
+      <div class="course-card">
+        <div class="course-title" id="bsTitle">—</div>
+        <div class="course-meta">
+          <span id="bsDist">—</span><span id="bsType">—</span><span id="bsPartic">—</span>
+        </div>
+        <div class="course-route" id="bsRoute">—</div>
+        <div class="participants-bar">
+          <div class="pb-lbl" data-i18n="pb_lbl">참여 현황</div>
+          <div class="pb-track"><div class="pb-fill" id="pbFill"></div></div>
+          <div class="pb-count" id="pbCount">—</div>
+        </div>
+      </div>
+      <!-- diff -->
+      <div class="diff-badge" id="diffBadge">
+        <div class="diff-dot" id="diffDot"></div>
+        <div style="flex:1">
+          <div class="diff-lbl" id="diffLbl">—</div>
+          <div class="diff-adv" id="diffAdv">—</div>
+        </div>
+        <div class="diff-ratio" id="diffRatio">—</div>
+      </div>
+      <!-- actions -->
+      <div class="action-row">
+        <button class="join-btn"        id="joinBtn"       onclick="handleJoin()">참여하기</button>
+        <button class="cancel-join-btn" id="cancelJoinBtn" onclick="handleCancelJoin()" style="display:none">참여취소</button>
+        <button class="end-btn"         id="endBtn"        onclick="handleEnd()" data-i18n-text="end_run">종료</button>
+        <button class="delete-meet-btn" id="deleteMeetBtn" onclick="handleDeleteMeeting()" style="display:none">모임취소</button>
+      </div>
+      <!-- attendees: add as friend -->
+      <div class="meeting-attendees" id="meetingAttendees" style="display:none">
+        <div class="ma-title" id="maTitle">PARTICIPANTS — 친구로 추가</div>
+        <div class="ma-list" id="maList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CREATE MODAL ── -->
+<div class="modal-ov" id="createOv">
+  <div class="modal">
+    <div class="modal-title">📍 <span data-i18n="create_title">새 모임 만들기</span></div>
+    <div class="field">
+      <div class="field-lbl" data-i18n="f_title">모임 이름</div>
+      <input id="fTitle" type="text" placeholder="예: 한강 새벽 크루런">
+    </div>
+    <div class="field">
+      <div class="field-lbl" data-i18n="f_loc" style="font-size:10px;color:#ffffff;">📍 모임 시작 장소</div>
+      <div class="loc-picked empty" id="locDisplay" onclick="startPickLocation()" style="cursor:pointer;">
+        <span id="locIcon">📍</span>
+        <span id="locText">지도를 클릭하여 장소를 선택하세요</span>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <div class="field-lbl" data-i18n="f_type">활동 유형</div>
+        <select id="fType" onchange="updateTypeHint()">
+          <option value="run">🏃 Running</option>
+          <option value="ride">🚴 Cycling</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="field-lbl" data-i18n="f_dist">거리 (km)</div>
+        <input id="fDist" type="number" min="1" max="200" placeholder="10">
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-lbl" data-i18n="f_dept">출발 시간</div>
+      <input id="fDept" type="datetime-local">
+    </div>
+    <div class="field">
+      <div class="field-lbl" data-i18n="f_max">최대 참여 인원</div>
+      <div class="participants-ctrl">
+        <button class="pc-btn" onclick="adjMax(-1)">−</button>
+        <div class="pc-val" id="maxVal">8</div>
+        <button class="pc-btn" onclick="adjMax(+1)">+</button>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:6px;" id="maxHint">명 (최대)</span>
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-lbl" data-i18n="f_route">코스 설명</div>
+      <textarea id="fRoute" placeholder="출발지 → 경유지 → 도착지"></textarea>
+    </div>
+    <div class="field">
+      <div class="field-lbl" id="fAttachLbl">📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span></div>
+      <div class="attach-drop" id="attachDrop"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleAttachDrop(event)">
+        <span class="attach-drop-icon">📂</span>
+        <span id="attachDropTxt">여기에 파일을 끌어다 놓거나 클릭하여 선택</span>
+        <input type="file" id="fAttach" multiple accept=".gpx,.jpg,.jpeg,.png,.webp"
+               style="position:absolute;inset:0;opacity:0;cursor:pointer"
+               onchange="handleAttachSelect(this.files)">
+      </div>
+      <div id="attachList" class="attach-list"></div>
+    </div>
+    <div id="typeHint" style="font-family:var(--mono);font-size:10px;color:var(--a2);margin-top:-8px;margin-bottom:12px;"></div>
+    <div class="modal-btns">
+      <button class="btn-primary" onclick="submitCreate()">모임 개설하기</button>
+      <button class="btn-cancel"  onclick="closeCreate()">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── FALLBACK MODAL ── -->
+<div class="modal-ov" id="fbOv">
+  <div class="fb-modal">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+      <div class="fb-icon" id="fbIcon" style="margin-bottom:0">⚠️</div>
+      <button onclick="document.getElementById('fbOv').classList.remove('on');popPanel();"
+        style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:0 4px;line-height:1;margin-top:-4px">✕</button>
+    </div>
+    <div class="fb-title" id="fbTitle">Engine Score 산출 불가</div>
+    <div class="fb-desc"  id="fbDesc">유효한 활동 데이터가 없습니다.</div>
+    <div class="field" style="margin-bottom:10px">
+      <!-- 종목 선택 드롭박스 -->
+      <select class="fb-cat-select" id="fbCatSelect" onchange="fbOnCatChange(this.value)">
+        <option value="run">🏃 직접 입력 (러닝)</option>
+        <option value="ride">🚴 직접 입력 (라이딩)</option>
+      </select>
+      <div style="position:relative;margin-top:8px">
+        <input class="score-input" id="fbInput" type="text" placeholder="예: 5:00">
+        <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:10px;color:var(--muted)" id="fbUnit">min/km</span>
+      </div>
+      <div class="val-msg" id="fbValMsg"></div>
+    </div>
+    <div class="preset-row" id="fbPresets"></div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn-primary" id="fbConfirm" onclick="fbConfirm()" disabled>이 점수로 시작</button>
+      <button class="btn-cancel"  onclick="fbSkip()" id="fbSkipBtn">구경하기</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const ALLOWED_TYPES = {
+  ride: ['Ride','VirtualRide'],
+  run:  ['Run','TrailRun','Trail Run'],
+};
+const EXPIRY_MS    = 24 * 60 * 60 * 1000;       // 24 h
+
+// ═══════════════════════════════════════════════════════════════
+//  7-TIER RAINBOW DIFFICULTY SYSTEM
+//  무지개 7단계: 빨·주·노·초·파·남·보
+//  ratio = myScore / hostScore  (두 스코어 단위가 동일해야 함)
+//
+//  < 0.60  →  T1 RED      완전 오버페이스
+//  0.60~0.80 →  T2 ORANGE  고난이도
+//  0.80~0.95 →  T3 YELLOW  다소 어려움
+//  0.95~1.05 →  T4 GREEN   황금 매치
+//  1.05~1.20 →  T5 CYAN    여유
+//  1.20~1.50 →  T6 BLUE    매우 여유
+//  > 1.50  →  T7 VIOLET  압도적 여유
+// ═══════════════════════════════════════════════════════════════
+const TIER_DEFS = [
+  { code:'T1', color:'#ff2d55', lo:0,    hi:0.60, ko:['완전 오버페이스','참여를 권장하지 않습니다'],       en:['Way Over Pace','Not recommended at all'] },
+  { code:'T2', color:'#ff6b2b', lo:0.60, hi:0.80, ko:['고난이도','페이스를 맞추기 어려울 수 있어요'],      en:['High Difficulty','Pace may be very hard to follow'] },
+  { code:'T3', color:'#ffd166', lo:0.80, hi:0.95, ko:['다소 어려움','조금 힘들 수 있습니다'],              en:['Slightly Hard','You may struggle a bit'] },
+  { code:'T4', color:'#06d6a0', lo:0.95, hi:1.05, ko:['황금 매치 ✦','최적의 페이스 파트너입니다'],         en:['Golden Match ✦','Perfect pace partner'] },
+  { code:'T5', color:'#00c8ff', lo:1.05, hi:1.20, ko:['여유 페이스','편안하게 함께할 수 있어요'],          en:['Easy Pace','You can ride/run comfortably'] },
+  { code:'T6', color:'#4477ff', lo:1.20, hi:1.50, ko:['매우 여유','충분히 리드할 수 있습니다'],            en:['Very Easy','You can lead with ease'] },
+  { code:'T7', color:'#b44fff', lo:1.50, hi:Infinity, ko:['압도적 여유','페이스가 크게 앞섭니다'],         en:['Dominant','Your pace is significantly faster'] },
+];
+const TIER_GRAY = { code:'GRAY', color:'#4a5568' };
+
+function classifyTier(ratio) {
+  if (ratio === null || !isFinite(ratio)) return TIER_GRAY;
+  return TIER_DEFS.find(t => ratio >= t.lo && ratio < t.hi) ?? TIER_DEFS[6];
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ENGINE SCORE  — 수동 입력 전용
+//  러닝: min/km (MM:SS) 직접 입력
+//  라이딩: w/kg 직접 입력
+//  티어 매칭(T1~T7): 내 점수 ÷ 호스트 점수 = ratio
+// ═══════════════════════════════════════════════════════════════
+class EngineScoreError extends Error {
+  constructor(code, detail=''){super(`[ES] ${code}: ${detail}`);this.code=code;}
+}
+
+const ErrCode = { NO_ACTIVITIES:'NO_ACTIVITIES', NO_ELIGIBLE:'NO_ELIGIBLE' };
+
+// ── EngineScore 유틸 (수동입력 전용) ─────────────────────────
+const EngineScore = {
+  // 수동 입력 결과 생성
+  createManual(score, cat='run') {
+    return { score, cat, source:'manual', algo:'manual',
+             breakdown:[], warnings:[], skipped:0 };
+  },
+  // 구경 모드 (점수 없음)
+  createGray() {
+    return { score:null, cat:null, source:'gray', algo:'gray',
+             breakdown:[], warnings:[], skipped:0 };
+  },
+  // 호스트와의 난이도 비교 → T1~T7
+  report(myResult, hostScore, lang='ko') {
+    if (!myResult?.score || !hostScore || hostScore <= 0) {
+      return { diff:{ code:'GRAY', tier:'—', color:'#4a5568', ratio:null } };
+    }
+    const ratio = myResult.score / hostScore;
+    const COLORS = {
+      T1:'#ff2d55', T2:'#ff6b2b', T3:'#ffd166',
+      T4:'#06d6a0', T5:'#00c8ff', T6:'#4477ff',
+      T7:'#b44fff', GRAY:'#4a5568'
+    };
+    let code, tier;
+    if      (ratio < 0.60) { code='T1'; tier=lang==='ko'?'완전 오버페이스':'Way Overpaced'; }
+    else if (ratio < 0.80) { code='T2'; tier=lang==='ko'?'고난이도':'Very Hard'; }
+    else if (ratio < 0.95) { code='T3'; tier=lang==='ko'?'다소 어려움':'Challenging'; }
+    else if (ratio < 1.05) { code='T4'; tier=lang==='ko'?'황금 매치 ✦':'Golden Match ✦'; }
+    else if (ratio < 1.20) { code='T5'; tier=lang==='ko'?'여유 페이스':'Comfortable'; }
+    else if (ratio < 1.50) { code='T6'; tier=lang==='ko'?'매우 여유':'Very Easy'; }
+    else                   { code='T7'; tier=lang==='ko'?'압도적 여유':'Dominant'; }
+    return { diff:{ code, tier, color: COLORS[code] ?? '#4a5568', ratio:Math.round(ratio*100)/100 } };
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  i18n
+// ═══════════════════════════════════════════════════════════════
+const I18N={
+  ko:{
+    leg_gray:'진행중 / 종료',
+    dep_lbl:'출발 시간', host_score_lbl:'호스트 점수', pb_lbl:'참여 현황',
+    create_title:'새 모임 만들기', f_title:'모임 이름', f_type:'활동 유형', f_dist:'거리(km)',
+    f_dept:'출발 시간', f_max:'최대 인원', f_route:'코스 설명', f_loc:'위치 선택',
+    join_btn:'참여하기', end_run:'종료',
+    status_future:'출발 전', status_running:'진행 중 🟡', status_ended:'종료됨',
+    algo_ride_power:   '⚡ 파워미터 · NP(W) ÷ 체중(kg) = w/kg',
+    algo_ride_waw:     '🔋 예상파워(WAW) · WAW(W) ÷ 체중(kg) = w/kg',
+    algo_run:          '🏃 러닝 알고리즘 · 1km당 페이스(sec/km) 역수',
+    filter_msg:(s,t)=>`⚡ ${s}개 활동이 거리/유형 기준 미달로 제외 (총 ${t}개 중)`,
+    manual_msg:s=>`✏️ 수동 입력 점수 ${s}pts 적용`,
+    gray_msg:'👀 구경 모드로 탐색 중',
+    full_msg:'❌ 이미 정원이 가득 찼습니다',
+    expired_msg:'이 모임은 종료되었습니다',
+    // 범례
+    leg_mutual:'🌈 서로 친구 모임', leg_mutual_sub:'1.5× 크기 · 무지개 핀',
+    leg_t1:'완전 오버페이스', leg_t2:'고난이도', leg_t3:'다소 어려움',
+    leg_t4:'황금 매치 ✦',   leg_t5:'여유 페이스', leg_t6:'매우 여유', leg_t7:'압도적 여유',
+    leg_gray_sub:'출발 후 24h 소멸',
+    // 친구 패널
+    fp_title:'친구 목록', fp_search_ph:'닉네임 검색...', fp_search_btn:'찾기',
+    fp_empty:'아직 친구가 없어요\n닉네임으로 검색하거나\n모임 참석자를 추가해보세요',
+    fp_mutual_badge:'서로 친구', fp_mutual_section:'⟳ 서로 친구',
+    fp_chat_start:'대화를 시작해보세요', friends_tab:'친구',
+    fp_add_toast:(n)=>`✓ ${n}님을 친구로 추가했습니다`,
+    fp_del_confirm:(n)=>`${n}님을 친구 목록에서 삭제할까요?`,
+    fp_attendees_title:'PARTICIPANTS — 친구로 추가',
+    // 반경바 · 종목 드롭박스
+    rb_lbl:'반경', rb_all:'전체',
+    cat_all:'🏃🚴 전체', cat_run:'🏃 러닝', cat_ride:'🚴 라이딩',
+    // 추가 UI
+    fb_confirm_btn:'이 점수로 시작', fb_skip_btn:'구경하기',
+    chat_leave:'나가기', chat_input_ph:'메시지 입력...',
+    add_friend_btn:'+ 추가', added_friend_btn:'✓ 추가됨',
+    logout_lbl:'로그아웃',
+    tab_login:'로그인', tab_signup:'회원가입',
+    lbl_email:'이메일', lbl_pw:'비밀번호', lbl_pw2:'비밀번호 확인',
+    lbl_nick:'닉네임', pw_placeholder:'비밀번호 입력', pw2_placeholder:'동일하게 입력',
+    login_btn:'로그인', signup_btn:'가입하기',
+    nick_preview_sub:'mate finder 닉네임 미리보기',
+    grade_elite:'엘리트', grade_adv:'상급', grade_mid:'중급', grade_beg:'입문',
+    es_close_btn:'확인',
+  },
+  en:{
+    leg_gray:'In Progress / Ended',
+    dep_lbl:'Departure', host_score_lbl:'HOST SCORE', pb_lbl:'Participants',
+    create_title:'Create Meeting', f_title:'Title', f_type:'Activity Type', f_dist:'Distance (km)',
+    f_dept:'Departure Time', f_max:'Max Participants', f_route:'Route', f_loc:'Pick Location',
+    join_btn:'Join Run', end_run:'End',
+    status_future:'Upcoming', status_running:'In Progress 🟡', status_ended:'Ended',
+    algo_ride_power:   '⚡ Power Meter · NP(W) ÷ Weight(kg) = w/kg',
+    algo_ride_waw:     '🔋 Est. Power (WAW) · WAW(W) ÷ Weight(kg) = w/kg',
+    algo_run:          '🏃 Run Algorithm · inverted pace (sec/km)',
+    filter_msg:(s,t)=>`⚡ ${s} activities excluded (type/distance filter) of ${t}`,
+    manual_msg:s=>`✏️ Manual score ${s}pts applied`,
+    gray_msg:'👀 Browsing without a score',
+    full_msg:'❌ This meeting is full',
+    expired_msg:'This meeting has ended',
+    // Legend
+    leg_mutual:'🌈 Mutual Friend Meeting', leg_mutual_sub:'1.5× size · Rainbow pin',
+    leg_t1:'Way Overpaced', leg_t2:'Very Hard', leg_t3:'Challenging',
+    leg_t4:'Golden Match ✦', leg_t5:'Comfortable', leg_t6:'Very Easy', leg_t7:'Dominant',
+    leg_gray_sub:'Expires 24h after departure',
+    // Friends panel
+    fp_title:'Friends', fp_search_ph:'Search nickname...', fp_search_btn:'Search',
+    fp_empty:'No friends yet\nSearch by nickname or\nadd participants from a meeting',
+    fp_mutual_badge:'Mutual', fp_mutual_section:'⟳ Mutual Friends',
+    fp_chat_start:'Start a conversation', friends_tab:'Friends',
+    fp_add_toast:(n)=>`✓ Added ${n} as a friend`,
+    fp_del_confirm:(n)=>`Remove ${n} from your friends?`,
+    fp_attendees_title:'PARTICIPANTS — Add as Friend',
+    // Radius bar · category dropdown
+    rb_lbl:'Radius', rb_all:'All',
+    cat_all:'🏃🚴 All', cat_run:'🏃 Running', cat_ride:'🚴 Cycling',
+    // 추가 UI
+    fb_confirm_btn:'Start with this score', fb_skip_btn:'Browse as guest',
+    chat_leave:'Leave', chat_input_ph:'Type a message...',
+    add_friend_btn:'+ Add', added_friend_btn:'✓ Added',
+    logout_lbl:'Log out',
+    tab_login:'Log in', tab_signup:'Sign up',
+    lbl_email:'Email', lbl_pw:'Password', lbl_pw2:'Confirm Password',
+    lbl_nick:'Nickname', pw_placeholder:'Enter password', pw2_placeholder:'Re-enter password',
+    login_btn:'Log in', signup_btn:'Sign up',
+    nick_preview_sub:'mate finder nickname preview',
+    grade_elite:'Elite', grade_adv:'Advanced', grade_mid:'Intermediate', grade_beg:'Beginner',
+    es_close_btn:'Got it',
+  },
+};
+let lang='ko';
+const tx=(k,...a)=>{const v=I18N[lang][k];return typeof v==='function'?v(...a):(v??k);};
+function setLang(l){
+  lang=l;
+  document.getElementById('bKO').classList.toggle('on',l==='ko');
+  document.getElementById('bEN').classList.toggle('on',l==='en');
+
+  // data-i18n 속성 기반 일괄 교체
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const v=I18N[l][el.dataset.i18n];
+    if(v&&typeof v==='string')el.textContent=v;
+  });
+
+  // ── 반경바 ──────────────────────────────────────────────────
+  const rbLbl = document.getElementById('rbLbl');
+  if(rbLbl) rbLbl.textContent = tx('rb_lbl');
+  const rbAllBtn = document.getElementById('rbAllBtn');
+  if(rbAllBtn) rbAllBtn.textContent = tx('rb_all');
+
+  // ── 종목 드롭박스 옵션 ───────────────────────────────────────
+  const catOptAll  = document.getElementById('catOptAll');
+  const catOptRun  = document.getElementById('catOptRun');
+  const catOptRide = document.getElementById('catOptRide');
+  if(catOptAll)  catOptAll.textContent  = tx('cat_all');
+  if(catOptRun)  catOptRun.textContent  = tx('cat_run');
+  if(catOptRide) catOptRide.textContent = tx('cat_ride');
+
+  // ── 친구 패널 ───────────────────────────────────────────────
+  const friendsTabLbl = document.getElementById('friendsTabLbl');
+  if(friendsTabLbl) friendsTabLbl.textContent = tx('friends_tab');
+  const fpTitleLbl = document.getElementById('fpTitleLbl');
+  if(fpTitleLbl) fpTitleLbl.textContent = tx('fp_title');
+  const fpSearchInput = document.getElementById('fpSearchInput');
+  if(fpSearchInput) fpSearchInput.placeholder = tx('fp_search_ph');
+  const fpSearchBtn = document.getElementById('fpSearchBtn');
+  if(fpSearchBtn) fpSearchBtn.textContent = tx('fp_search_btn');
+  const fpEmptyLbl = document.getElementById('fpEmptyLbl');
+  if(fpEmptyLbl) fpEmptyLbl.innerHTML = tx('fp_empty').replace(/\n/g,'<br>');
+
+  // ── 참석자 섹션 ─────────────────────────────────────────────
+  const maTitle = document.getElementById('maTitle');
+  if(maTitle) maTitle.textContent = tx('fp_attendees_title');
+
+  // ── Fallback 모달 버튼 ───────────────────────────────────────
+  const fbConfirmBtn = document.getElementById('fbConfirm');
+  if(fbConfirmBtn && fbConfirmBtn.textContent) fbConfirmBtn.textContent = tx('fb_confirm_btn');
+  const fbSkipBtn = document.getElementById('fbSkipBtn');
+  if(fbSkipBtn) fbSkipBtn.textContent = tx('fb_skip_btn');
+
+  // ── 채팅창 ───────────────────────────────────────────────────
+  const cpLeaveBtn = document.getElementById('cpLeaveBtn');
+  if(cpLeaveBtn) cpLeaveBtn.textContent = tx('chat_leave');
+  const cpInput = document.getElementById('cpInput');
+  if(cpInput) cpInput.placeholder = tx('chat_input_ph');
+
+  // ── 유저칩 로그아웃 ─────────────────────────────────────────
+  const ucLogoutLbl = document.getElementById('ucLogoutLbl');
+  if(ucLogoutLbl) ucLogoutLbl.textContent = tx('logout_lbl');
+
+  // ── 인증 화면 ────────────────────────────────────────────────
+  const tabLogin  = document.getElementById('tabLogin');
+  const tabSignup = document.getElementById('tabSignup');
+  const liSubmit  = document.getElementById('liSubmit');
+  const suSubmit  = document.getElementById('suSubmit');
+  if(tabLogin)  tabLogin.textContent  = tx('tab_login');
+  if(tabSignup) tabSignup.textContent = tx('tab_signup');
+  if(liSubmit && liSubmit.textContent)  liSubmit.textContent  = tx('login_btn');
+  if(suSubmit && suSubmit.textContent)  suSubmit.textContent  = tx('signup_btn');
+  // 폼 라벨
+  document.querySelectorAll('.af-lbl').forEach(el => {
+    const t = el.textContent.trim().split(' ')[0]; // 첫 단어만 비교
+    if(t === '이메일' || t === 'Email')     el.textContent = tx('lbl_email');
+    if(t === '비밀번호' || t === 'Password') {
+      if(el.nextElementSibling?.querySelector('#suPw2')) return;
+      el.textContent = tx('lbl_pw');
+    }
+    if(t === '닉네임' || t === 'Nickname')  el.textContent = tx('lbl_nick');
+  });
+  // 비밀번호 확인 라벨 (텍스트로 찾기)
+  document.querySelectorAll('.af-lbl').forEach(el => {
+    if(el.textContent.includes('비밀번호 확인') || el.textContent.includes('Confirm'))
+      el.textContent = tx('lbl_pw2');
+  });
+  // placeholder
+  const liPw  = document.getElementById('liPw');
+  const suPw  = document.getElementById('suPw');
+  const suPw2 = document.getElementById('suPw2');
+  if(liPw)  liPw.placeholder  = tx('pw_placeholder');
+  if(suPw)  suPw.placeholder  = tx('pw_placeholder');
+  if(suPw2) suPw2.placeholder = tx('pw2_placeholder');
+  // 닉네임 미리보기 서브
+  const npSub = document.querySelector('.np-sub');
+  if(npSub) npSub.textContent = tx('nick_preview_sub');
+
+  // ── ES 모달 닫기 버튼 ───────────────────────────────────────
+  // (이미 _updateEsModal에서 처리)
+
+  // ── 친구 목록 다시 렌더 ─────────────────────────────────────
+  renderFriendsList();
+
+  if(currentMeeting)renderBS(currentMeeting);
+  updateTypeHint();
+  updateHudUnit();
+  if(document.getElementById('esModalOv')?.classList.contains('on')) _updateEsModal();
+  if(document.getElementById('fbOv')?.classList.contains('on') && _fbCat) _fbApplyCat(_fbCat);
+  if(globalResult?.cat === 'run' && globalResult?.source !== 'manual') onResolved();
+  _checkEmptyState();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MOCK DATA  (activities cover both ride + run)
+// ═══════════════════════════════════════════════════════════════
+// MY_ACTIVITIES 제거됨 (Strava 연동 삭제)
+
+// Meetings now managed by Firestore real-time listener (_startMeetingsListener)
+// MEETINGS 배열은 onLoginSuccess 이후 Firestore에서 실시간으로 채워짐
+const now=Date.now();  // 타임스탬프 유틸 (다른 곳에서 사용)
+
+// ═══════════════════════════════════════════════════════════════
+//  MEETING STATUS LOGIC
+// ═══════════════════════════════════════════════════════════════
+function meetingStatus(m){
+  const now=Date.now();
+  const elapsed=now-m.departAt;
+  if(elapsed<0)return'future';
+  if(elapsed>=EXPIRY_MS)return'expired';
+  // Also expire if all participants ended
+  if(m.joinedUsers.size>0&&m.joinedUsers.size===m.endedUsers.size)return'expired';
+  return'running';
+}
+
+function isExpired(m){return meetingStatus(m)==='expired';}
+function isFull(m){return m.participants>=m.maxP;}
+
+// ═══════════════════════════════════════════════════════════════
+//  GEO FILTER  —  현재 위치 기반 반경 필터
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Haversine 공식: 두 좌표 사이의 직선거리(km) ─────────────
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R  = 6371;
+  const dL = (lat2 - lat1) * Math.PI / 180;
+  const dG = (lng2 - lng1) * Math.PI / 180;
+  const a  = Math.sin(dL/2) ** 2
+           + Math.cos(lat1 * Math.PI/180)
+           * Math.cos(lat2 * Math.PI/180)
+           * Math.sin(dG/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const GeoFilter = {
+  // ── 현재 내 위치 (GPS 수신 성공 시 갱신) ────────────────────
+  myLat: null,
+  myLng: null,
+
+  // ── 선택된 반경 km  (0 = 전체 표시, 필터 없음) ──────────────
+  radiusKm: 30,
+
+  // ── Leaflet 레이어 핸들 (내 위치 마커 + 반경 원) ─────────────
+  _myMarker:  null,
+  _myCircle:  null,
+
+  // ──────────────────────────────────────────────────────────────
+  //  init()  : 로그인 성공 직후 한 번 호출
+  //  GPS 권한 요청 → 성공/실패에 따라 분기
+  // ──────────────────────────────────────────────────────────────
+  init() {
+    if (!navigator.geolocation) {
+      console.warn('[GeoFilter] Geolocation API 미지원 → 서울 폴백');
+      this._applyFallback();
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        // ✅ GPS 권한 허용됨
+        this.myLat = pos.coords.latitude;
+        this.myLng = pos.coords.longitude;
+        console.info(`[GeoFilter] GPS 수신 성공: ${this.myLat}, ${this.myLng}`);
+        this._onLocationReady();
+      },
+      (err) => {
+        // ❌ GPS 권한 거부 또는 오류 → 서울 폴백
+        console.warn('[GeoFilter] GPS 권한 거부/오류 →', err.message, '→ 서울 폴백');
+        this._applyFallback();
+      },
+      { timeout: 8000, maximumAge: 60000, enableHighAccuracy: false }
+    );
+  },
+
+  // ──────────────────────────────────────────────────────────────
+  //  ⚠ 개발용 폴백 — 실서비스 전 아래 블록 전체 삭제하세요
+  //  [FALLBACK_BLOCK_START]
+  // ──────────────────────────────────────────────────────────────
+  _applyFallback() {
+    this.myLat = 37.5665;   // 서울시청 위도
+    this.myLng = 126.9780;  // 서울시청 경도
+    console.info('[GeoFilter] 폴백 좌표 적용: 서울시청 (37.5665, 126.9780)');
+    showToast('B', lang === 'ko'
+      ? '📍 위치 권한 없음 — 서울 중심 좌표로 표시 중 (개발 모드)'
+      : '📍 Location unavailable — using Seoul fallback (dev mode)');
+    this._onLocationReady();
+  },
+  //  [FALLBACK_BLOCK_END]
+  // ──────────────────────────────────────────────────────────────
+
+  // ── 위치 확정 후 공통 처리 ───────────────────────────────────
+  _onLocationReady() {
+    this._drawMyLocation();
+    buildMarkers();           // 위치 확정 후 마커 재빌드
+    MAP.setView([this.myLat, this.myLng], MAP.getZoom());
+  },
+
+  // ── 내 위치 마커 + 반경 원 그리기 ───────────────────────────
+  _drawMyLocation() {
+    // 기존 레이어 제거
+    if (this._myMarker) MAP.removeLayer(this._myMarker);
+    if (this._myCircle) MAP.removeLayer(this._myCircle);
+
+    // 내 위치 파란 dot 마커
+    const dotEl = document.createElement('div');
+    dotEl.className = 'my-loc-dot';
+    this._myMarker = L.marker([this.myLat, this.myLng], {
+      icon: L.divIcon({ html: dotEl, iconSize:[16,16], iconAnchor:[8,8], className:'' }),
+      zIndexOffset: 2000,
+    }).addTo(MAP);
+    this._myMarker.bindTooltip(
+      lang === 'ko' ? '내 위치' : 'My Location',
+      { permanent: false, direction: 'top' }
+    );
+
+    // 반경 원 (radiusKm=0 이면 그리지 않음)
+    if (this.radiusKm > 0) {
+      this._myCircle = L.circle([this.myLat, this.myLng], {
+        radius:      this.radiusKm * 1000,   // m
+        color:       '#00b4ff',
+        weight:      1.5,
+        opacity:     0.5,
+        fillColor:   '#00b4ff',
+        fillOpacity: 0.04,
+      }).addTo(MAP);
+    }
+  },
+
+  // ── 반경 변경 ────────────────────────────────────────────────
+  setRadius(km) {
+    this.radiusKm = km;
+    this._drawMyLocation();
+    buildMarkers();
+  },
+
+  // ── 특정 모임이 반경 안에 있는지 판별 ───────────────────────
+  //  myLat/myLng 가 null(위치 미확정)이거나 radiusKm=0이면 항상 true
+  isInRange(meeting) {
+    if (this.myLat === null || this.radiusKm === 0) return true;
+    const d = haversineKm(this.myLat, this.myLng, meeting.coord[0], meeting.coord[1]);
+    return d <= this.radiusKm;
+  },
+};
+
+// ── 반경 버튼 클릭 핸들러 ────────────────────────────────────
+function setRadius(km) {
+  GeoFilter.setRadius(km);
+  // 버튼 active 상태 갱신
+  document.querySelectorAll('.rb-btn').forEach(b => {
+    b.classList.toggle('on', Number(b.dataset.km) === km);
+  });
+  // localStorage에 선택값 저장 (다음 접속 시 복원)
+  localStorage.setItem('pm_radius_km', km);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CAT FILTER  —  운동 종목 필터 (전체 / 러닝 / 라이딩)
+// ═══════════════════════════════════════════════════════════════
+const CatFilter = {
+  // 'all' | 'run' | 'ride'
+  cat: 'all',
+
+  // 마커 핀 투명도 계산
+  // • 선택된 종목과 같거나 'all' 이면 → 1.0 (불투명)
+  // • 다른 종목이면 → 0.30 (흐리게)
+  opacity(meetingCat) {
+    if (this.cat === 'all') return 1.0;
+    return meetingCat === this.cat ? 1.0 : 0.30;
+  },
+
+  // 드롭박스 색상 클래스 갱신
+  _updateSelectStyle() {
+    const el = document.getElementById('catSelect');
+    if (!el) return;
+    el.className = 'cat-select';
+    if (this.cat === 'ride') el.classList.add('ride-on');
+    if (this.cat === 'run')  el.classList.add('run-on');
+  },
+
+  set(cat) {
+    this.cat = cat;
+    this._updateSelectStyle();
+    buildMarkers();
+    // HUD 로고 아이콘 반영
+    const logoIcon = document.querySelector('.logo-icon');
+    if (logoIcon) {
+      logoIcon.textContent = cat === 'ride' ? '🚴' : cat === 'run' ? '🏃' : '🏃';
+    }
+  },
+};
+
+function setCat(val) {
+  CatFilter.set(val);
+  localStorage.setItem('pm_cat_filter', val);
+
+  // 해당 종목 점수로 globalResult 교체
+  const result = ScoreStore.get(val);
+  if (result) {
+    globalResult = result;
+  } else {
+    // 해당 종목 데이터 없음 → Fallback
+    const e = new EngineScoreError('NO_ELIGIBLE', '데이터 없음');
+    e.cat = val === 'all' ? 'run' : val;
+    openFallback('NO_ELIGIBLE', e);
+    globalResult = EngineScore.createGray();
+  }
+
+  onResolved();
+  updateHudUnit();  // onResolved 이후에 단위 덮어쓰기
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LEAFLET MAP  —  OpenStreetMap (API 키 불필요)
+// ═══════════════════════════════════════════════════════════════
+const MAP = L.map('map', {
+  center: [37.535, 127.010],
+  zoom: 13,
+  zoomControl: true,
+  attributionControl: true,
+});
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  maxZoom: 19,
+}).addTo(MAP);
+
+// ─── Custom SVG pin factory ──────────────────────────────────
+function makePinIcon(color, isGray=false, expired=false, catOpacity=1){
+  const c = expired ? '#4a5568' : color;
+  const baseOpacity = expired ? 0.5 : 1;
+  const opacity = baseOpacity * catOpacity;
+  const pulse = (expired || catOpacity < 0.99) ? '' : `
+    <circle cx="16" cy="10" r="12" fill="none" stroke="${c}" stroke-width="1.2" opacity="0.4">
+      <animate attributeName="r"       from="10" to="22" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" from="0.6" to="0"  dur="2s" repeatCount="indefinite"/>
+    </circle>`;
+  const dashArray = expired ? '4,3' : 'none';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="44" viewBox="0 0 32 44" opacity="${opacity}" style="filter:drop-shadow(0 4px 10px ${c}88)">
+    ${pulse}
+    <ellipse cx="16" cy="42" rx="5" ry="2" fill="rgba(0,0,0,0.25)"/>
+    <path d="M16 2 C8 2 2 8 2 16 C2 28 16 42 16 42 C16 42 30 28 30 16 C30 8 24 2 16 2Z"
+      fill="${c}" stroke="rgba(0,0,0,0.25)" stroke-width="1" stroke-dasharray="${dashArray}"/>
+    <circle cx="16" cy="16" r="6" fill="rgba(255,255,255,0.9)"/>
+    ${expired ? `<text x="16" y="20" text-anchor="middle" font-size="10" font-family="monospace" fill="#666">✕</text>` : ''}
+  </svg>`;
+  return L.divIcon({ html: svg, iconSize:[32,44], iconAnchor:[16,44], popupAnchor:[0,-44], className:'' });
+}
+
+// ─── 서로 친구가 만든 모임: 1.5배 크기 + 무지개 핀 ───────────
+function makeMutualPinIcon(expired=false, catOpacity=1){
+  // 기본 32×44 → 1.5배 → 48×66
+  const W=48, H=66, cx=W/2, pulseR=cx-2;
+  const baseOpacity = expired ? 0.45 : 1;
+  const opacity = baseOpacity * catOpacity;
+
+  // 무지개 7색 stops (빨→주→노→초→파→남→보)
+  const gradId = 'rg_' + Math.random().toString(36).slice(2,7);
+  const stops = `
+    <stop offset="0%"    stop-color="#ff2d55"/>
+    <stop offset="16.6%" stop-color="#ff6b2b"/>
+    <stop offset="33.3%" stop-color="#ffd166"/>
+    <stop offset="50%"   stop-color="#06d6a0"/>
+    <stop offset="66.6%" stop-color="#00c8ff"/>
+    <stop offset="83.3%" stop-color="#4477ff"/>
+    <stop offset="100%"  stop-color="#b44fff"/>`;
+
+  // 테두리 pulse — 무지개 색 순환 (hue-rotate animation)
+  const pulse = (expired || catOpacity < 0.99) ? '' : `
+    <circle cx="${cx}" cy="${cx*0.65}" r="${pulseR*0.72}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" opacity="0.5"
+      style="transform-origin:${cx}px ${cx*0.65}px">
+      <animate attributeName="r"       from="${pulseR*0.55}" to="${pulseR*1.15}" dur="2.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" from="0.65" to="0"    dur="2.2s" repeatCount="indefinite"/>
+    </circle>`;
+
+  const dashArray = expired ? '5,4' : 'none';
+
+  // pin path scaled to 48×66 viewport
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 48 66" opacity="${opacity}"
+    style="filter:drop-shadow(0 5px 14px rgba(180,79,255,.55)) drop-shadow(0 2px 6px rgba(0,200,255,.4))">
+    <defs>
+      <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+        ${stops}
+      </linearGradient>
+    </defs>
+    ${pulse}
+    <ellipse cx="24" cy="63" rx="7" ry="2.5" fill="rgba(0,0,0,0.22)"/>
+    <path d="M24 3 C12 3 3 12 3 24 C3 42 24 63 24 63 C24 63 45 42 45 24 C45 12 36 3 24 3Z"
+      fill="url(#${gradId})" stroke="rgba(255,255,255,0.25)" stroke-width="1.2" stroke-dasharray="${dashArray}"/>
+    <circle cx="24" cy="24" r="9" fill="rgba(255,255,255,0.92)"/>
+    <text x="24" y="28" text-anchor="middle" font-size="11" font-family="serif">🌈</text>
+    ${expired ? `<text x="24" y="30" text-anchor="middle" font-size="13" font-family="monospace" fill="#888">✕</text>` : ''}
+  </svg>`;
+  // iconAnchor Y = H (tip at bottom), popupAnchor Y = -H
+  return L.divIcon({ html: svg, iconSize:[W,H], iconAnchor:[W/2,H], popupAnchor:[0,-H], className:'' });
+}
+
+// ─── Build / refresh all markers ────────────────────────────
+// 7단계 색상은 TIER_DEFS + TIER_GRAY에서 직접 읽음
+function getTierColor(code){
+  if(code==='GRAY')return TIER_GRAY.color;
+  return TIER_DEFS.find(t=>t.code===code)?.color ?? TIER_GRAY.color;
+}
+let leafletMarkers = {};
+let currentMeeting = null;
+let globalResult   = null;
+
+function buildMarkers(){
+  Object.values(leafletMarkers).forEach(m => MAP.removeLayer(m));
+  leafletMarkers = {};
+
+  // window.MEETINGS 참조 (Firestore 실시간 데이터)
+  const meetings = window.MEETINGS || [];
+
+  meetings.forEach(m => {
+    if(isExpired(m)) return;
+
+    // ── 반경 필터: 내 위치 기준 GeoFilter.radiusKm 초과 시 제외 ──
+    if(!GeoFilter.isInRange(m)) return;
+
+    const status = meetingStatus(m);
+
+    // ── 종목 필터 투명도: 선택된 종목과 다르면 0.30으로 흐리게 ──
+    const catOpacity = CatFilter.opacity(m.cat);
+
+    // ── 서로 친구가 만든 모임 판별 ────────────────────────────────
+    const isMutualHost = !!(m.host.id && FriendStore.isMutualSync(m.host.id));
+
+    let icon;
+    if(isMutualHost && status !== 'running'){
+      icon = makeMutualPinIcon(false, catOpacity);
+    } else {
+      const report = globalResult ? EngineScore.report(globalResult, m.host.score, lang) : null;
+      const code   = status === 'running' ? 'GRAY' : (report?.diff.code ?? 'GRAY');
+      const color  = getTierColor(code);
+      icon = makePinIcon(color, code === 'GRAY', status === 'running', catOpacity);
+    }
+
+    // 흐린 마커는 클릭 우선순위를 낮춤 (zOffset 감소)
+    const zOffset = isMutualHost
+      ? (catOpacity < 0.99 ? 500  : 2000)
+      : (status === 'future'
+          ? (catOpacity < 0.99 ? 100 : 1000)
+          : (catOpacity < 0.99 ? 50  : 500));
+
+    const marker = L.marker(m.coord, { icon, zIndexOffset: zOffset, opacity: 1 })
+      .addTo(MAP)
+      .on('click', () => openBS(m));
+
+    leafletMarkers[m.id] = marker;
+  });
+
+  // 7번: 보이는 마커 없으면 빈 상태 표시
+  _checkEmptyState();
+}
+
+// ─── Tick: refresh statuses every minute ────────────────────
+setInterval(() => {
+  buildMarkers();
+  if(currentMeeting && isExpired(currentMeeting)) closeBS();
+}, 60000);
+
+// module script에서 접근할 수 있도록 전역 노출
+window.buildMarkers      = buildMarkers;
+window._checkEmptyState  = _checkEmptyState;
+window.onLoginSuccess    = onLoginSuccess;
+
+// ═══════════════════════════════════════════════════════════════
+//  BOTTOM SHEET
+// ═══════════════════════════════════════════════════════════════
+function openBS(m){
+  currentMeeting=m;
+  renderBS(m);
+  document.getElementById('bsBack').classList.add('on');
+  document.getElementById('bs').classList.add('on');
+  pushPanel('bs');
+}
+function closeBS(){
+  document.getElementById('bsBack').classList.remove('on');
+  document.getElementById('bs').classList.remove('on');
+  currentMeeting=null;
+  popPanel();
+}
+
+async function renderBS(m){
+  const status=meetingStatus(m);
+  const D=I18N[lang];
+
+  // ── Departure banner ────────────────────────────
+  const depTime=new Date(m.departAt);
+  document.getElementById('depTimeVal').textContent=
+    depTime.toLocaleString(lang==='ko'?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+
+  const depIcon=document.getElementById('depIcon');
+  const depSt=document.getElementById('depStatus');
+  if(status==='future'){
+    depIcon.textContent='🕐';
+    const diff=m.departAt-Date.now();
+    const h=Math.floor(diff/3600000), mn=Math.floor((diff%3600000)/60000);
+    depSt.textContent=lang==='ko'?`${h}시간 ${mn}분 후 출발`:`in ${h}h ${mn}m`;
+    depSt.className='dep-status future';
+  }else if(status==='running'){
+    depIcon.textContent='🏃';
+    depSt.textContent=D.status_running;
+    depSt.className='dep-status running';
+  }else{
+    depIcon.textContent='✓';
+    depSt.textContent=D.status_ended;
+    depSt.className='dep-status ended';
+  }
+
+  // ── Host ────────────────────────────────────────
+  const avEmoji=['🏃','⚡','🚴','🌄'][MEETINGS.indexOf(m)]??'👤';
+  document.getElementById('bsAv').textContent=avEmoji;
+  document.getElementById('bsHostName').textContent=m.host.name;
+  const hostUnit = m.cat === 'ride' ? ' w/kg' : ' min/km';
+  document.getElementById('bsHostScore').textContent = m.host.score + hostUnit;
+  document.getElementById('bsHostAlgo').textContent=m.cat==='ride'
+    ?(lang==='ko'?'라이딩 점수':'Ride Score')
+    :(lang==='ko'?'러닝 페이스 점수':'Run Pace Score');
+
+  // Algo badge
+  const algoKey = m.cat==='ride'
+    ? (globalResult?.hasPower ? 'algo_ride_power' : 'algo_ride_waw')
+    : 'algo_run';
+  document.getElementById('bsAlgoBadge').textContent=`⚙ ${D[algoKey]??algoKey}`;
+
+  // ── Course ──────────────────────────────────────
+  document.getElementById('bsTitle').textContent=m.title;
+  document.getElementById('bsDist').textContent=`${m.distKm}km`;
+  document.getElementById('bsType').textContent=m.cat==='ride'
+    ?(lang==='ko'?'🚴 라이딩':'🚴 Cycling')
+    :(lang==='ko'?'🏃 러닝':'🏃 Running');
+  const partic=m.participants+(m.joinedUsers.size);
+  document.getElementById('bsPartic').textContent=lang==='ko'
+    ?`${partic}/${m.maxP}명`:`${partic}/${m.maxP}`;
+  document.getElementById('bsRoute').textContent=m.route;
+
+  // Participants bar
+  const pct=Math.min(100,partic/m.maxP*100);
+  document.getElementById('pbFill').style.width=pct+'%';
+  document.getElementById('pbFill').style.background=
+    pct>=100?'var(--red)':'linear-gradient(90deg,var(--accent),var(--a2))';
+  document.getElementById('pbCount').textContent=lang==='ko'
+    ?`${partic}명 참여 중 / 최대 ${m.maxP}명`
+    :`${partic} joined / max ${m.maxP}`;
+
+  // ── Difficulty badge ─────────────────────────────
+  const report=globalResult
+    ?EngineScore.report(globalResult,m.host.score,lang)
+    :null;
+  const diff=report?.diff??{
+    code:'GRAY',color:TIER_GRAY.color,
+    label:lang==='ko'?'매칭 불가':'No Match',
+    advice:lang==='ko'?'점수를 입력하면 난이도를 알 수 있어요':'Enter score to see difficulty',
+    ratio:null,
+  };
+
+  // Override to GRAY if running
+  const displayDiff=status==='running'
+    ?{...diff,code:'GRAY',color:TIER_GRAY.color,label:D.status_running,advice:D.expired_msg??'',ratio:null}
+    :diff;
+
+  const badge=document.getElementById('diffBadge');
+  badge.style.background=displayDiff.color+'18';
+  badge.style.borderColor=displayDiff.color+'45';
+  document.getElementById('diffDot').style.background=displayDiff.color;
+  document.getElementById('diffDot').style.boxShadow=`0 0 7px ${displayDiff.color}`;
+  document.getElementById('diffLbl').textContent=displayDiff.label;
+  document.getElementById('diffLbl').style.color=displayDiff.color;
+  document.getElementById('diffAdv').textContent=displayDiff.advice;
+  document.getElementById('diffRatio').textContent=displayDiff.ratio!==null?displayDiff.ratio+'%':'—';
+  document.getElementById('diffRatio').style.color=displayDiff.color;
+
+  // ── Buttons ──────────────────────────────────────
+  const joinBtn       = document.getElementById('joinBtn');
+  const cancelJoinBtn = document.getElementById('cancelJoinBtn');
+  const endBtn        = document.getElementById('endBtn');
+  const deleteMeetBtn = document.getElementById('deleteMeetBtn');
+  const full = isFull(m) || partic >= m.maxP;
+
+  const isHost     = currentUser && m.host.id === currentUser.id;
+  const hasJoined  = currentUser && m.joinedUsers.has(currentUser.id);
+  const hasEnded   = currentUser && m.endedUsers.has(currentUser.id);
+
+  joinBtn.style.background = displayDiff.color;
+  joinBtn.style.color = ['T3','T4'].includes(displayDiff.code) ? '#000' : '#fff';
+  joinBtn.textContent = D.join_btn;
+
+  if (status === 'future') {
+    if (hasJoined) {
+      // 참여 완료 → 참여취소 버튼 표시
+      joinBtn.style.display       = 'none';
+      cancelJoinBtn.style.display = 'flex';
+      cancelJoinBtn.disabled      = false;
+      cancelJoinBtn.textContent   = lang==='ko'?'참여 취소':'Cancel Join';
+    } else {
+      joinBtn.style.display       = 'flex';
+      joinBtn.disabled            = full;
+      cancelJoinBtn.style.display = 'none';
+    }
+    endBtn.style.display        = 'none';
+    deleteMeetBtn.style.display = isHost ? 'flex' : 'none';
+  } else if (status === 'running') {
+    joinBtn.style.display       = 'none';
+    cancelJoinBtn.style.display = 'none';
+    endBtn.style.display        = 'flex';
+    endBtn.disabled             = hasEnded;
+    endBtn.textContent          = hasEnded ? (lang==='ko'?'종료 완료':'Ended') : D.end_run;
+    deleteMeetBtn.style.display = 'none';
+  } else {
+    // expired
+    joinBtn.style.display       = 'none';
+    cancelJoinBtn.style.display = 'none';
+    endBtn.style.display        = 'none';
+    deleteMeetBtn.style.display = 'none';
+  }
+
+  // ── Meeting attendees (add as friend) ───────────────────
+  await renderMeetingAttendees(m);
+}
+
+// ── Firestore 모임 업데이트 헬퍼 ─────────────────────────────
+async function _updateMeeting(meetingId, data) {
+  const { doc, updateDoc } = window._fb;
+  await updateDoc(doc(window._fbDb, 'meetings', meetingId), data);
+}
+async function _deleteMeeting(meetingId) {
+  const { doc, deleteDoc } = window._fb;
+  await deleteDoc(doc(window._fbDb, 'meetings', meetingId));
+}
+
+// ── 참여하기 ─────────────────────────────────────────────────
+async function handleJoin() {
+  if (!currentMeeting) return;
+  const m = currentMeeting;
+  if (isFull(m)) { showToast('A', tx('full_msg')); return; }
+  const btn = document.getElementById('joinBtn');
+  btn.disabled = true; btn.textContent = lang==='ko'?'처리 중...':'Processing...';
+  try {
+    const { arrayUnion } = window._fb;
+    await _updateMeeting(m.id, { participantUids: arrayUnion(currentUser.id) });
+    // 로컬 즉시 반영 (스냅샷 기다리지 않음)
+    m.joinedUsers.add(currentUser.id);
+    m.participants = Math.min(m.maxP, m.participants + 1);
+    renderBS(m);
+    showToast('B', lang==='ko'?'✓ 모임에 참여했습니다!':'✓ Joined the meeting!');
+  } catch(e) {
+    console.error('[handleJoin]', e);
+    showToast('A', lang==='ko'?'참여 중 오류 발생':'Error joining meeting');
+    btn.disabled = false;
+  }
+}
+
+// ── 참여 취소 (출발 전만) ────────────────────────────────────
+async function handleCancelJoin() {
+  if (!currentMeeting) return;
+  const m = currentMeeting;
+  if (!confirm(lang==='ko'?'참여를 취소하시겠어요?':'Cancel your participation?')) return;
+  const btn = document.getElementById('cancelJoinBtn');
+  if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'처리 중...':'Processing...'; }
+  try {
+    const { arrayRemove } = window._fb;
+    await _updateMeeting(m.id, { participantUids: arrayRemove(currentUser.id) });
+    // 로컬 즉시 반영
+    m.joinedUsers.delete(currentUser.id);
+    m.participants = Math.max(0, m.participants - 1);
+    renderBS(m);
+    showToast('B', lang==='ko'?'참여를 취소했습니다':'Participation cancelled');
+  } catch(e) {
+    console.error('[handleCancelJoin]', e);
+    showToast('A', lang==='ko'?'취소 중 오류 발생':'Error cancelling');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── 종료하기 (출발 후) ───────────────────────────────────────
+async function handleEnd() {
+  if (!currentMeeting) return;
+  const m = currentMeeting;
+  const btn = document.getElementById('endBtn');
+  btn.disabled = true;
+  try {
+    const { arrayUnion } = window._fb;
+    await _updateMeeting(m.id, { endedUids: arrayUnion(currentUser.id) });
+    // 로컬 즉시 반영
+    m.endedUsers.add(currentUser.id);
+    renderBS(m);
+    // 매너 평가 모달 오픈
+    await openMannerModal(m);
+  } catch(e) {
+    console.error('[handleEnd]', e);
+    showToast('A', lang==='ko'?'오류가 발생했습니다':'An error occurred');
+    btn.disabled = false;
+  }
+}
+
+// ── 모임 취소(삭제) — 호스트만 ──────────────────────────────
+async function handleDeleteMeeting() {
+  if (!currentMeeting) return;
+  const m = currentMeeting;
+  if (m.host.id !== currentUser.id) {
+    showToast('A', lang==='ko'?'모임 개설자만 취소할 수 있습니다':'Only the host can cancel');
+    return;
+  }
+  if (!confirm(lang==='ko'?`"${m.title}" 모임을 취소(삭제)하시겠어요?\n참여자들에게도 사라집니다.`:`Cancel "${m.title}"?\nThis will remove it for all participants.`)) return;
+  try {
+    await _deleteMeeting(m.id);
+    closeBS();
+    showToast('B', lang==='ko'?'모임이 취소되었습니다':'Meeting cancelled');
+  } catch(e) {
+    console.error('[handleDeleteMeeting]', e);
+    showToast('A', lang==='ko'?'삭제 중 오류 발생':'Error deleting meeting');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AUTH STORE  — localStorage 기반 (프로토타입)
+//  실서비스에서는 서버 인증으로 교체 필요
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  AUTH  —  Firebase Authentication (module script에서 처리)
+//  doLogin / doSignup / doLogout 은 head의 module script에서
+//  window.doLogin / window.doSignup / window.doLogout 으로 노출됨
+// ═══════════════════════════════════════════════════════════════
+const AuthStore = {
+  // 닉네임 중복 확인은 module script의 nickExists() 사용
+  // 여기선 UI 유효성 검사만 담당
+};
+
+let currentUser = null;
+let activeTab   = 'login';
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.getElementById('tabLogin').classList.toggle('on',  tab === 'login');
+  document.getElementById('tabSignup').classList.toggle('on', tab === 'signup');
+  document.getElementById('loginForm').classList.toggle('hidden',  tab !== 'login');
+  document.getElementById('signupForm').classList.toggle('hidden', tab !== 'signup');
+}
+
+// ── Login validation ─────────────────────────────────────────
+function validateLoginEmail() {
+  const v   = document.getElementById('liEmail').value.trim();
+  const el  = document.getElementById('liEmail');
+  const msg = document.getElementById('liEmailMsg');
+  const icon = document.getElementById('liEmailIcon');
+  const ok  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  el.className = 'af-input ' + (v ? (ok ? 'ok' : 'err') : '');
+  icon.textContent = v ? (ok ? '✓' : '✕') : '';
+  msg.className = 'af-msg ' + (ok ? 'ok' : 'err');
+  msg.textContent = v && !ok ? (lang==='ko'?'올바른 이메일 형식이 아닙니다':'Invalid email format') : '';
+  checkLoginReady();
+}
+function validateLoginPw() {
+  const v  = document.getElementById('liPw').value;
+  const el = document.getElementById('liPw');
+  el.className = 'af-input ' + (v.length >= 1 ? 'ok' : '');
+  document.getElementById('liPwMsg').textContent = '';
+  checkLoginReady();
+}
+function checkLoginReady() {
+  const email = document.getElementById('liEmail').value.trim();
+  const pw    = document.getElementById('liPw').value;
+  document.getElementById('liSubmit').disabled =
+    !(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && pw.length >= 1);
+}
+
+// doLogin → window.doLogin (module script)
+
+// ── Signup validation ────────────────────────────────────────
+function validateSuEmail() {
+  const v   = document.getElementById('suEmail').value.trim();
+  const el  = document.getElementById('suEmail');
+  const msg = document.getElementById('suEmailMsg');
+  const icon = document.getElementById('suEmailIcon');
+  if (!v) { el.className='af-input'; icon.textContent=''; msg.textContent=''; checkSignupReady(); return; }
+  const fmt = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  if (!fmt) {
+    el.className='af-input err'; icon.textContent='✕';
+    msg.className='af-msg err'; msg.textContent=lang==='ko'?'올바른 이메일 형식이 아닙니다':'Invalid email format';
+  } else {
+    el.className='af-input ok'; icon.textContent='✓';
+    msg.className='af-msg ok'; msg.textContent='';
+  }
+  checkSignupReady();
+}
+function validateSuNick() {
+  const v    = document.getElementById('suNick').value.trim();
+  const el   = document.getElementById('suNick');
+  const msg  = document.getElementById('suNickMsg');
+  const icon = document.getElementById('suNickIcon');
+  const preview = document.getElementById('nickPreview');
+  if (!v) { el.className='af-input'; icon.textContent=''; msg.textContent=''; preview.style.display='none'; checkSignupReady(); return; }
+  const fmt = /^[a-zA-Z0-9가-힣]{2,12}$/.test(v);
+  if (!fmt) {
+    el.className='af-input err'; icon.textContent='✕';
+    msg.className='af-msg err'; msg.textContent=lang==='ko'?'2~12자, 한글/영문/숫자만 가능':'2-12 chars, letters/numbers only';
+    preview.style.display='none';
+  } else {
+    el.className='af-input ok'; icon.textContent='✓';
+    msg.className='af-msg ok'; msg.textContent=lang==='ko'?'사용 가능한 닉네임입니다':'Nickname available';
+    const avatars=['🏃','🚴','⚡','🌟','🔥','💨'];
+    document.getElementById('npAvatar').textContent = avatars[v.length % avatars.length];
+    document.getElementById('npName').textContent   = v;
+    preview.style.display='flex';
+  }
+  checkSignupReady();
+}
+function validateSuPw() {
+  const v  = document.getElementById('suPw').value;
+  const el = document.getElementById('suPw');
+  const msg = document.getElementById('suPwMsg');
+  if (!v) { el.className='af-input'; msg.textContent=''; checkSignupReady(); return; }
+  const ok = v.length >= 6;
+  el.className = 'af-input '+(ok?'ok':'err');
+  msg.className = 'af-msg '+(ok?'ok':'err');
+  msg.textContent = ok ? (lang==='ko'?'✓ 사용 가능':'✓ OK') : (lang==='ko'?'6자 이상 입력해주세요':'Min 6 characters');
+  validateSuPw2();
+  checkSignupReady();
+}
+function validateSuPw2() {
+  const pw   = document.getElementById('suPw').value;
+  const pw2  = document.getElementById('suPw2').value;
+  const el   = document.getElementById('suPw2');
+  const msg  = document.getElementById('suPw2Msg');
+  const icon = document.getElementById('suPw2Icon');
+  if (!pw2) { el.className='af-input'; msg.textContent=''; icon.textContent=''; checkSignupReady(); return; }
+  const ok = pw === pw2;
+  el.className='af-input '+(ok?'ok':'err');
+  icon.textContent = ok?'✓':'✕';
+  msg.className='af-msg '+(ok?'ok':'err');
+  msg.textContent = ok ? (lang==='ko'?'비밀번호가 일치합니다':'Passwords match') : (lang==='ko'?'비밀번호가 일치하지 않습니다':'Passwords do not match');
+  checkSignupReady();
+}
+function checkSignupReady() {
+  const email = document.getElementById('suEmail').value.trim();
+  const nick  = document.getElementById('suNick').value.trim();
+  const pw    = document.getElementById('suPw').value;
+  const pw2   = document.getElementById('suPw2').value;
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const nickOk  = /^[a-zA-Z0-9가-힣]{2,12}$/.test(nick);
+  const pwOk    = pw.length >= 6 && pw === pw2;
+  document.getElementById('suSubmit').disabled = !(emailOk && nickOk && pwOk);
+}
+
+// doSignup → window.doSignup (module script)
+
+// ── Login success → enter map ────────────────────────────────
+function onLoginSuccess(user) {
+  // 중복 호출 방지
+  if (currentUser && currentUser.id === user.id) return;
+
+  currentUser = { id: user.id, email: user.email, nickname: user.nickname };
+  document.getElementById('authScreen').classList.add('hidden');
+
+  // HUD 업데이트
+  document.getElementById('userChip').style.display = 'flex';
+  document.getElementById('ucName').textContent = currentUser.nickname;
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  document.getElementById('ucAv').textContent = avatars[currentUser.nickname.length % avatars.length];
+
+  // 반경 필터 바 표시
+  document.getElementById('radiusBar').classList.add('on');
+  requestAnimationFrame(updateMobileHeaderHeight);
+
+  // 저장된 필터 복원
+  const savedRadius = parseInt(localStorage.getItem('pm_radius_km') ?? '30', 10);
+  GeoFilter.radiusKm = savedRadius;
+  document.querySelectorAll('.rb-btn').forEach(b => {
+    b.classList.toggle('on', Number(b.dataset.km) === savedRadius);
+  });
+  const savedCat = localStorage.getItem('pm_cat_filter') ?? 'all';
+  const catSelect = document.getElementById('catSelect');
+  if (catSelect) catSelect.value = savedCat;
+  CatFilter.cat = savedCat;
+  CatFilter._updateSelectStyle();
+  updateHudUnit();
+
+  // GPS
+  GeoFilter.init();
+
+  // 친구 캐시 갱신 완료 후 → 모임 리스너 시작 (무지개 핀 정확하게 표시)
+  FriendStore.refresh().then(() => {
+    renderFriendsList();
+    updateFriendsBadge();
+    if (typeof window._startMeetingsListener === 'function') {
+      window._startMeetingsListener();
+    }
+  });
+
+  // 내 매너 온도 로드
+  updateMyTemp();
+
+  // Engine score
+  bootMap();
+}
+
+// ── Firestore 모임 실시간 리스너 ─────────────────────────────
+// MEETINGS: Firestore 실시간 리스너가 window.MEETINGS를 채움
+// 항상 window.MEETINGS 참조 → 전역 단일 소스
+if (!window.MEETINGS) window.MEETINGS = [];
+Object.defineProperty(window, 'MEETINGS', {
+  get() { return this._MEETINGS || []; },
+  set(v) { this._MEETINGS = v; },
+  configurable: true,
+});
+
+// _startMeetingsListener → window._startMeetingsListener (module script)
+
+// doLogout → window.doLogout (module script)
+
+// ─── Map click → location pick flow ─────────────────────────
+let pickingLocation = false, pendingLatLng = null;
+
+function startPickLocation() {
+  // Close create modal temporarily, show hint
+  document.getElementById('createOv').classList.remove('on');
+  pickingLocation = true;
+  MAP.getContainer().style.cursor = 'crosshair';
+  document.getElementById('mapHint').classList.add('on');
+}
+
+MAP.on('click', e => {
+  if (!pickingLocation) return;
+  pendingLatLng = e.latlng;
+  pickingLocation = false;
+  MAP.getContainer().style.cursor = '';
+  document.getElementById('mapHint').classList.remove('on');
+
+  // Update location display
+  const locDisplay = document.getElementById('locDisplay');
+  const locText    = document.getElementById('locText');
+  const locIcon    = document.getElementById('locIcon');
+  locDisplay.className = 'loc-picked';
+  locIcon.textContent  = '✅';
+  locText.textContent  = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+
+  // Re-open create modal
+  document.getElementById('createOv').classList.add('on');
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  CREATE MODAL
+// ═══════════════════════════════════════════════════════════════
+let maxParticipants = 8;
+
+function openCreate() {
+  if (!currentUser) { showToast('A', lang === 'ko' ? '로그인 후 모임을 만들 수 있습니다' : 'Please log in to create a meeting'); return; }
+  const d = new Date(Date.now() + 3600000);
+  document.getElementById('fDept').value = d.toISOString().slice(0, 16);
+  maxParticipants = 8;
+  document.getElementById('maxVal').textContent = 8;
+  // Reset location
+  pendingLatLng = null;
+  document.getElementById('locDisplay').className = 'loc-picked empty';
+  document.getElementById('locIcon').textContent  = '📍';
+  document.getElementById('locText').textContent  = lang === 'ko' ? '지도를 클릭하여 장소를 선택하세요' : 'Click the map to set location';
+  // 5번: 필터 종목 자동선택 (all이면 run 기본)
+  const fType = document.getElementById('fType');
+  const activeCat = CatFilter.cat !== 'all' ? CatFilter.cat : 'run';
+  fType.value = activeCat;
+  updateTypeHint();
+  _resetAttach();
+  document.getElementById('createOv').classList.add('on');
+  pushPanel('create');
+}
+function closeCreate() {
+  document.getElementById('createOv').classList.remove('on');
+  pickingLocation = false;
+  MAP.getContainer().style.cursor = '';
+  document.getElementById('mapHint').classList.remove('on');
+  _resetAttach();
+  popPanel();
+}
+function adjMax(d) { maxParticipants = Math.max(2, Math.min(100, maxParticipants + d)); document.getElementById('maxVal').textContent = maxParticipants; }
+function updateTypeHint() {
+  const cat  = document.getElementById('fType')?.value;
+  const hint = document.getElementById('typeHint');
+  if (!hint) return;
+  hint.textContent = cat === 'ride'
+    ? (lang === 'ko'
+        ? '🚴 라이딩: 파워미터(NP) 우선, 없으면 스트라바 예상파워(WAW) ÷ 체중 = w/kg'
+        : '🚴 Ride: Power meter (NP) preferred; fallback Strava WAW ÷ weight = w/kg')
+    : (lang === 'ko'
+        ? '🏃 러닝: 1km당 소요시간(sec/km) 역수 비교'
+        : '🏃 Run: inverse of pace (sec/km) comparison');
+}
+async function submitCreate() {
+  const title = document.getElementById('fTitle').value.trim();
+  const cat   = document.getElementById('fType').value;
+  const dist  = parseFloat(document.getElementById('fDist').value);
+  const dept  = new Date(document.getElementById('fDept').value).getTime();
+  const route = document.getElementById('fRoute').value.trim() || '—';
+  if (!title || !dist || !dept || !pendingLatLng) {
+    showToast('A', lang==='ko'?'모든 필드를 입력하고 지도에서 장소를 선택해주세요':'Fill all fields and pick a location');
+    return;
+  }
+  const btn = document.querySelector('#createOv .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
+
+  try {
+    await window._firestoreSubmitCreate({
+      title, cat,
+      coord:           [pendingLatLng.lat, pendingLatLng.lng],
+      distKm:          dist,
+      route,
+      departAt:        dept,
+      maxP:            maxParticipants,
+      hostUid:         currentUser.id,
+      hostName:        currentUser.nickname,
+      hostScore:       globalResult?.score ?? 0,
+      hostCat:         globalResult?.cat ?? cat,
+      participantUids: [],
+      endedUids:       [],
+    });
+    // 성공: 모달 닫기 + 버튼 복원
+    if (btn) { btn.disabled = false; btn.textContent = lang==='ko'?'모임 개설':'Create'; }
+    closeCreate();
+    pendingLatLng = null;
+    showToast('B', lang==='ko'?`✓ "${title}" 모임이 개설되었습니다`:`✓ "${title}" created`);
+  } catch(e) {
+    console.error('[submitCreate]', e);
+    showToast('A', lang==='ko'?'모임 저장 중 오류 발생':'Error saving meeting');
+    if (btn) { btn.disabled = false; btn.textContent = lang==='ko'?'모임 개설':'Create'; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FALLBACK MODAL
+// ═══════════════════════════════════════════════════════════════
+let _fbCat = null;   // 'ride' | 'run'
+
+// ── 프리셋 정의 ─────────────────────────────────────────────
+//   run  : 사용자 입력값 = min/km (소수점 가능)
+//   ride : 사용자 입력값 = w/kg
+
+// ── 프리셋 정의 ─────────────────────────────────────────────
+const FB_PRESETS = {
+  run: [
+    { label: '입문',   sub: '5:00/km 이상', value: '6:30' },
+    { label: '중급',   sub: '5:00/km 이하', value: '4:30' },
+    { label: '상급',   sub: '4:00/km 이하', value: '3:50' },
+    { label: '엘리트', sub: '3:00/km 이하', value: '2:50' },
+  ],
+  ride: [
+    { label: '입문',   sub: '2.5w/kg 이하', value: 2.0 },
+    { label: '중급',   sub: '3.2w/kg 이하', value: 2.8 },
+    { label: '상급',   sub: '4.2w/kg 이하', value: 3.7 },
+    { label: '엘리트', sub: '4.2w/kg 이상', value: 4.5 },
+  ],
+};
+const FB_PRESETS_EN = {
+  run: [
+    { label: 'Beginner',     sub: 'over 5:00/km',  value: '6:30' },
+    { label: 'Intermediate', sub: 'under 5:00/km', value: '4:30' },
+    { label: 'Advanced',     sub: 'under 4:00/km', value: '3:50' },
+    { label: 'Elite',        sub: 'under 3:00/km', value: '2:50' },
+  ],
+  ride: [
+    { label: 'Beginner',     sub: 'under 2.5w/kg', value: 2.0 },
+    { label: 'Intermediate', sub: 'under 3.2w/kg', value: 2.8 },
+    { label: 'Advanced',     sub: 'under 4.2w/kg', value: 3.7 },
+    { label: 'Elite',        sub: 'above 4.2w/kg', value: 4.5 },
+  ],
+};
+
+function _fbApplyCat(cat) {
+  _fbCat = cat;
+  const isRide = cat === 'ride';
+  const inp    = document.getElementById('fbInput');
+  const unitEl = document.getElementById('fbUnit');
+  const sel    = document.getElementById('fbCatSelect');
+
+  // 드롭박스 색상
+  sel.className = 'fb-cat-select' + (isRide ? ' ride' : '');
+  sel.value = cat;
+
+  // 입력 필드 설정
+  if (isRide) {
+    inp.type = 'number';
+    inp.step = '0.01'; inp.min = '0.5'; inp.max = '10';
+    inp.placeholder = lang === 'ko' ? '예: 3.2' : 'e.g. 3.2';
+    unitEl.textContent = 'w/kg';
+  } else {
+    inp.type = 'text';
+    inp.step = ''; inp.min = ''; inp.max = '';
+    inp.placeholder = lang === 'ko' ? '예: 4:30' : 'e.g. 4:30';
+    unitEl.textContent = 'min/km';
+  }
+  inp.value = '';
+
+  // 프리셋 렌더
+  const presets = (lang === 'ko' ? FB_PRESETS : FB_PRESETS_EN)[cat];
+  document.getElementById('fbPresets').innerHTML = presets.map(p =>
+    `<button class="preset" onclick="fbPreset(${p.value})">
+      <strong>${p.label}</strong><br>${p.sub}
+    </button>`
+  ).join('');
+
+  fbValidate();
+}
+
+function openFallback(reason, err) {
+  const m = document.getElementById('fbOv');
+
+  // 컨텍스트 감지: 에러 → err.cat, 수동편집 → globalResult.cat, 기본 → 'run'
+  const detectedCat = err?.cat ?? globalResult?.cat ?? 'run';
+
+  // 제목·설명
+  document.getElementById('fbIcon').textContent =
+    reason === 'NO_ACTIVITIES' ? (detectedCat === 'ride' ? '🚴' : '🏃')
+    : reason === 'NO_ELIGIBLE' ? '📏' : '✏️';
+
+  document.getElementById('fbTitle').textContent =
+    reason === 'NO_ACTIVITIES' ? (lang === 'ko' ? '활동 없음'   : 'No Activities') :
+    reason === 'NO_ELIGIBLE'   ? (lang === 'ko' ? '데이터 부족' : 'Insufficient Data') :
+    (lang === 'ko' ? '내 점수 직접 입력' : 'Enter My Score');
+
+  document.getElementById('fbDesc').textContent = lang === 'ko'
+    ? '종목을 선택하고 나의 현재 실력을 입력하거나\n아래 가이드에서 가장 가까운 단계를 선택하세요.'
+    : 'Select your activity type and enter your current level,\nor pick the closest tier from the guide below.';
+
+  // 이전 점수 복원 (수동 편집 시)
+  // 종목 드롭박스 + 입력 필드 + 프리셋 초기화
+  _fbApplyCat(detectedCat);
+
+  // 기존 수동 입력값 복원 (초기화 후에 덮어써야 유지됨)
+  if (reason === 'edit' && globalResult?.score) {
+    if (globalResult.cat === 'run') {
+      const minKm = 1000000 / globalResult.score / 60;
+      document.getElementById('fbInput').value = toMMSS(minKm);
+    } else {
+      document.getElementById('fbInput').value = globalResult.score;
+    }
+    fbValidate();
+  }
+
+  m.classList.add('on');
+  pushPanel('fallback');
+}
+
+// 드롭박스 변경 시
+function fbOnCatChange(val) {
+  _fbApplyCat(val);
+}
+
+// ── MM:SS 파싱 헬퍼 ─────────────────────────────────────────
+// "4:30" → 4.5 (min/km 소수), "4.5" → 4.5, 실패 시 NaN
+// min/km 소수 → "M:SS" 표시용
+
+function fbSkip() {
+  globalResult = EngineScore.createGray();
+  document.getElementById('fbOv').classList.remove('on');
+  popPanel();
+  onResolved();
+}
+
+function fbPreset(v) {
+  document.getElementById('fbInput').value = v;
+  fbValidate();
+}
+
+function fbConfirm() {
+  const raw = document.getElementById('fbInput').value;
+  let score;
+  if (_fbCat === 'ride') {
+    const v = parseFloat(raw);
+    if (!isFinite(v) || v <= 0) return;
+    score = Math.round(v * 100) / 100;
+  } else {
+    const minKm = parseMMSS(raw);
+    if (!isFinite(minKm) || minKm <= 0) return;
+    score = Math.round(1000000 / (minKm * 60) * 100) / 100;
+  }
+  const cat = _fbCat ?? 'run';
+  ScoreStore.setManual(score, cat);
+  globalResult = ScoreStore.get(cat);
+  document.getElementById('fbOv').classList.remove('on');
+  popPanel();
+  onResolved();
+}
+
+function fbValidate() {
+  const raw   = document.getElementById('fbInput').value;
+  const msg   = document.getElementById('fbValMsg');
+  const btn   = document.getElementById('fbConfirm');
+  const isRide = _fbCat === 'ride';
+
+  if (!raw.trim()) { msg.textContent = ''; btn.disabled = true; return; }
+
+  if (isRide) {
+    const v = parseFloat(raw);
+    if (!isFinite(v) || v < 0.5 || v > 10) {
+      msg.textContent = lang === 'ko' ? '0.5 ~ 10.0 w/kg 범위로 입력하세요' : 'Enter 0.5–10.0 w/kg';
+      msg.className = 'val-msg err'; btn.disabled = true; return;
+    }
+    msg.textContent = `✓ ${v} w/kg`;
+  } else {
+    const minKm = parseMMSS(raw);
+    if (!isFinite(minKm) || minKm < 1.5 || minKm > 15) {
+      msg.textContent = lang === 'ko'
+        ? '1:30 ~ 15:00 범위로 입력하세요 (예: 4:30)'
+        : 'Enter 1:30–15:00 (e.g. 4:30)';
+      msg.className = 'val-msg err'; btn.disabled = true; return;
+    }
+    msg.textContent = `✓ ${toMMSS(minKm)} /km`;
+  }
+  msg.className = 'val-msg ok'; btn.disabled = false;
+}
+// ═══════════════════════════════════════════════════════════════
+//  FRIEND STORE  — localStorage 기반
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  MANNER TEMPERATURE SYSTEM  —  매너 온도
+//  기본값 36.5°C, Firestore users/{uid}.mannerTemp 에 저장
+// ═══════════════════════════════════════════════════════════════
+
+const MANNER_ITEMS = [
+  { id:'time',   icon:'⏰', labelKo:'시간 약속을 잘 지켰어요',   labelEn:'Was punctual',         delta:+0.5, type:'positive' },
+  { id:'pace',   icon:'🤝', labelKo:'페이스를 잘 배려해줬어요',  labelEn:'Considerate of pace',  delta:+0.5, type:'positive' },
+  { id:'safe',   icon:'🔰', labelKo:'안전하게 이끌어줬어요',     labelEn:'Led safely',           delta:+0.5, type:'positive' },
+  { id:'mood',   icon:'😄', labelKo:'분위기가 즐거웠어요',       labelEn:'Great atmosphere',     delta:+0.3, type:'positive' },
+  { id:'again',  icon:'🔥', labelKo:'또 함께 달리고 싶어요',     labelEn:'Would run again',      delta:+0.5, type:'positive' },
+  { id:'noshow', icon:'😤', labelKo:'무단 불참했어요',           labelEn:'No-show',              delta:-1.0, type:'negative' },
+];
+
+const MannerStore = {
+  async getTemp(uid) {
+    try {
+      const { doc, getDoc } = window._fb;
+      const snap = await getDoc(doc(window._fbDb, 'users', uid));
+      return snap.exists() ? (snap.data().mannerTemp ?? 36.5) : 36.5;
+    } catch { return 36.5; }
+  },
+  async updateTemp(uid, delta) {
+    try {
+      const { doc, getDoc, updateDoc } = window._fb;
+      const ref  = doc(window._fbDb, 'users', uid);
+      const snap = await getDoc(ref);
+      const cur  = snap.exists() ? (snap.data().mannerTemp ?? 36.5) : 36.5;
+      const next = Math.max(30, Math.min(50, Math.round((cur + delta) * 10) / 10));
+      await updateDoc(ref, { mannerTemp: next });
+      return next;
+    } catch(e) { console.error('[MannerStore.updateTemp]', e); return null; }
+  },
+  async saveReview(fromUid, toUid, meetingId, selectedIds, delta) {
+    try {
+      const { collection, addDoc, serverTimestamp } = window._fb;
+      await addDoc(collection(window._fbDb, 'mannerReviews'), {
+        fromUid, toUid, meetingId, selectedIds, delta,
+        createdAt: serverTimestamp(),
+      });
+    } catch(e) { console.error('[MannerStore.saveReview]', e); }
+  },
+  async hasReviewed(fromUid, toUid, meetingId) {
+    try {
+      const { collection, query, where, getDocs } = window._fb;
+      const q = query(
+        collection(window._fbDb, 'mannerReviews'),
+        where('fromUid',    '==', fromUid),
+        where('toUid',      '==', toUid),
+        where('meetingId',  '==', meetingId)
+      );
+      const snap = await getDocs(q);
+      return !snap.empty;
+    } catch { return false; }
+  },
+};
+
+function tempClass(t) {
+  if (t >= 40) return 'hot';
+  if (t >= 38) return 'warm';
+  if (t < 35)  return 'cool';
+  return 'base';
+}
+
+async function updateMyTemp() {
+  if (!currentUser) return;
+  const t  = await MannerStore.getTemp(currentUser.id);
+  const el = document.getElementById('ucTemp');
+  if (!el) return;
+  el.textContent   = `${t}°`;
+  el.className     = `manner-temp ${tempClass(t)}`;
+  el.style.display = 'inline-block';
+}
+
+// ── 매너 평가 모달 ──────────────────────────────────────────
+let _mannerMeeting    = null;
+let _mannerSelections = {};
+
+async function openMannerModal(meeting) {
+  _mannerMeeting    = meeting;
+  _mannerSelections = {};
+
+  const uids = [...new Set([meeting.host.id, ...(meeting.joinedUsers ?? [])])]
+    .filter(uid => uid && uid !== currentUser.id);
+
+  if (!uids.length) {
+    showToast('B', lang==='ko'?'수고하셨습니다! 🎉':'Great job! 🎉');
+    return;
+  }
+
+  const toRate = [];
+  for (const uid of uids) {
+    const done = await MannerStore.hasReviewed(currentUser.id, uid, meeting.id);
+    if (!done) toRate.push(uid);
+  }
+  if (!toRate.length) {
+    showToast('B', lang==='ko'?'이미 모든 분을 평가했습니다 😊':'Already reviewed everyone 😊');
+    return;
+  }
+
+  const { doc, getDoc } = window._fb;
+  const profiles = await Promise.all(toRate.map(async uid => {
+    const snap = await getDoc(doc(window._fbDb, 'users', uid));
+    const temp = await MannerStore.getTemp(uid);
+    return snap.exists()
+      ? { uid, nickname: snap.data().nickname, temp }
+      : { uid, nickname: uid.slice(0,6), temp: 36.5 };
+  }));
+
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  document.getElementById('mannerSub').textContent =
+    lang==='ko' ? '함께한 분들의 매너를 평가해주세요' : 'Rate your fellow participants';
+  document.getElementById('mannerSubmitBtn').textContent =
+    lang==='ko' ? '평가 완료' : 'Submit Reviews';
+
+  document.getElementById('mannerPersonList').innerHTML = profiles.map(p => {
+    _mannerSelections[p.uid] = new Set();
+    const av = avatars[p.nickname.length % avatars.length];
+    const items = MANNER_ITEMS.map(item => `
+      <div class="manner-item" id="mi_${p.uid}_${item.id}"
+           onclick="toggleMannerItem('${p.uid}','${item.id}','${item.type}')">
+        <span class="manner-item-icon">${item.icon}</span>
+        <span class="manner-item-label">${lang==='ko'?item.labelKo:item.labelEn}</span>
+        <span class="manner-item-delta">${item.delta>0?'+':''}${item.delta}°</span>
+      </div>`).join('');
+    return `<div class="manner-person">
+      <div class="manner-person-head">
+        <div class="manner-person-av">${av}</div>
+        <div class="manner-person-info">
+          <div class="manner-person-name">${p.nickname}</div>
+          <div class="manner-person-temp">${lang==='ko'?'현재':'Current'} ${p.temp}°C</div>
+        </div>
+      </div>
+      <div class="manner-items">${items}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('mannerOv').classList.add('on');
+  pushPanel('manner');
+}
+
+function toggleMannerItem(uid, itemId, type) {
+  const sel = _mannerSelections[uid];
+  if (type === 'negative') {
+    MANNER_ITEMS.filter(i => i.type==='positive').forEach(i => {
+      sel.delete(i.id);
+      const e = document.getElementById(`mi_${uid}_${i.id}`);
+      if (e) e.className = 'manner-item';
+    });
+  } else {
+    MANNER_ITEMS.filter(i => i.type==='negative').forEach(i => {
+      sel.delete(i.id);
+      const e = document.getElementById(`mi_${uid}_${i.id}`);
+      if (e) e.className = 'manner-item';
+    });
+  }
+  const el = document.getElementById(`mi_${uid}_${itemId}`);
+  if (sel.has(itemId)) { sel.delete(itemId); el.className = 'manner-item'; }
+  else                 { sel.add(itemId);    el.className = `manner-item selected ${type}`; }
+}
+
+async function submitMannerReviews() {
+  const btn = document.getElementById('mannerSubmitBtn');
+  btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...';
+  try {
+    for (const [uid, selected] of Object.entries(_mannerSelections)) {
+      if (!selected.size) continue;
+      const delta   = [...selected].reduce((s,id) => s + (MANNER_ITEMS.find(i=>i.id===id)?.delta??0), 0);
+      const rounded = Math.round(delta * 10) / 10;
+      await MannerStore.saveReview(currentUser.id, uid, _mannerMeeting.id, [...selected], rounded);
+      await MannerStore.updateTemp(uid, rounded);
+    }
+    closeMannerModal();
+    showToast('B', lang==='ko'?'✓ 매너 평가 완료!':'✓ Reviews submitted!');
+    updateMyTemp();
+  } catch(e) {
+    console.error('[submitMannerReviews]', e);
+    showToast('A', lang==='ko'?'평가 중 오류 발생':'Error submitting');
+    btn.disabled = false;
+    btn.textContent = lang==='ko'?'평가 완료':'Submit Reviews';
+  }
+}
+
+function closeMannerModal() {
+  document.getElementById('mannerOv').classList.remove('on');
+  _mannerMeeting = null;
+  popPanel();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FRIEND STORE  —  Firestore 기반
+//  경로: friends/{myUid}/list/{friendUid}
+// ═══════════════════════════════════════════════════════════════
+const FriendStore = {
+
+  _col() {
+    const { collection } = window._fb;
+    return collection(window._fbDb, 'friends', currentUser.id, 'list');
+  },
+
+  // 친구 목록 로드 (비동기)
+  async load() {
+    try {
+      const { getDocs } = window._fb;
+      const snap = await getDocs(this._col());
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch { return []; }
+  },
+
+  // 친구 추가
+  async add(friendId, nickname) {
+    try {
+      const { doc, setDoc, serverTimestamp } = window._fb;
+      await setDoc(doc(window._fbDb, 'friends', currentUser.id, 'list', friendId), {
+        id: friendId, nickname, addedAt: serverTimestamp(),
+      });
+      return true;
+    } catch(e) { console.error('[FriendStore.add]', e); return false; }
+  },
+
+  // 친구 삭제
+  async remove(friendId) {
+    try {
+      const { doc, deleteDoc } = window._fb;
+      await deleteDoc(doc(window._fbDb, 'friends', currentUser.id, 'list', friendId));
+    } catch(e) { console.error('[FriendStore.remove]', e); }
+  },
+
+  // 친구 여부 확인 (비동기)
+  async isFriend(friendId) {
+    try {
+      const { doc, getDoc } = window._fb;
+      const snap = await getDoc(doc(window._fbDb, 'friends', currentUser.id, 'list', friendId));
+      return snap.exists();
+    } catch { return false; }
+  },
+
+  // 상호 친구 여부 (상대방도 나를 추가했는지)
+  async isMutual(friendId) {
+    if (!currentUser) return false;
+    try {
+      const { doc, getDoc } = window._fb;
+      const snap = await getDoc(doc(window._fbDb, 'friends', friendId, 'list', currentUser.id));
+      return snap.exists();
+    } catch { return false; }
+  },
+
+  // 친구 수
+  async count() {
+    try {
+      const { getDocs } = window._fb;
+      const snap = await getDocs(this._col());
+      return snap.size;
+    } catch { return 0; }
+  },
+
+  // 캐시 (renderFriendsList에서 사용)
+  _cache: [],
+  _mutualCache: new Set(),
+
+  // 캐시 갱신
+  async refresh() {
+    this._cache = await this.load();
+    const [mutuals, temps] = await Promise.all([
+      Promise.all(this._cache.map(async f => ({ id: f.id, mutual: await this.isMutual(f.id) }))),
+      Promise.all(this._cache.map(async f => ({ id: f.id, temp: await MannerStore.getTemp(f.id) }))),
+    ]);
+    this._mutualCache = new Set(mutuals.filter(m => m.mutual).map(m => m.id));
+    this._tempCache   = Object.fromEntries(temps.map(t => [t.id, t.temp]));
+    // 캐시에 temp 추가
+    this._cache = this._cache.map(f => ({ ...f, temp: this._tempCache[f.id] ?? 36.5 }));
+  },
+
+  // 캐시 기반 동기 접근 (UI 렌더용)
+  isFriendSync(friendId)  { return this._cache.some(f => f.id === friendId); },
+  isMutualSync(friendId)  { return this._mutualCache.has(friendId); },
+};
+
+// ─── Chat Store — Firestore 실시간 ──────────────────────────
+const ChatStore = {
+  // 채팅방 ID: 두 UID 정렬 후 합침 (양방향 동일)
+  _chatId(friendId) {
+    return [currentUser?.id ?? 'anon', friendId].sort().join('_');
+  },
+
+  // 메시지 전송
+  async send(friendId, text) {
+    const { collection, addDoc, serverTimestamp } = window._fb;
+    const chatId = this._chatId(friendId);
+    await addDoc(
+      collection(window._fbDb, 'chats', chatId, 'messages'),
+      { from: currentUser.id, text, ts: serverTimestamp() }
+    );
+  },
+
+  // 채팅 내용 전체 삭제 (나가기)
+  async clear(friendId) {
+    const { collection, getDocs, deleteDoc } = window._fb;
+    const chatId = this._chatId(friendId);
+    const snap = await getDocs(collection(window._fbDb, 'chats', chatId, 'messages'));
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+  },
+
+  // 실시간 리스너 (openChat에서 호출)
+  _unsub: null,
+  listen(friendId, onUpdate) {
+    // 기존 리스너 해제
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    const { collection, query, orderBy, onSnapshot } = window._fb;
+    const chatId = this._chatId(friendId);
+    const q = query(
+      collection(window._fbDb, 'chats', chatId, 'messages'),
+      orderBy('ts', 'asc')
+    );
+    this._unsub = onSnapshot(q, snap => {
+      const msgs = snap.docs.map(d => ({
+        id:   d.id,
+        from: d.data().from,
+        text: d.data().text,
+        ts:   d.data().ts?.toMillis?.() ?? Date.now(),
+      }));
+      onUpdate(msgs);
+    });
+  },
+  stopListen() {
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+  },
+
+  // 마지막 메시지 미리보기용 (캐시)
+  _preview: {},
+  setPreview(friendId, msgs) { this._preview[friendId] = msgs; },
+  getPreview(friendId)       { return this._preview[friendId] ?? []; },
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  FRIENDS PANEL UI
+// ═══════════════════════════════════════════════════════════════
+let fpOpen = false;
+
+function toggleFriendsPanel() {
+  fpOpen = !fpOpen;
+  document.getElementById('friendsPanel').classList.toggle('open', fpOpen);
+  document.getElementById('friendsTab').classList.toggle('open', fpOpen);
+  document.body.classList.toggle('fp-open', fpOpen);
+  if (fpOpen) {
+    FriendStore.refresh().then(() => {
+      renderFriendsList();
+      updateFriendsBadge();
+      buildMarkers();  // 무지개 핀 갱신
+    });
+    pushPanel('friends');
+  } else {
+    popPanel();
+  }
+}
+
+function fpOnInput() {
+  const v = document.getElementById('fpSearchInput').value.trim();
+  if (!v) document.getElementById('fpSearchResult').innerHTML = '';
+}
+
+// ── 닉네임 검색 (Firestore users 컬렉션) ────────────────────
+async function fpDoSearch() {
+  if (!currentUser) return;
+  const q   = document.getElementById('fpSearchInput').value.trim();
+  const res = document.getElementById('fpSearchResult');
+  if (!q) { res.innerHTML = ''; return; }
+  res.innerHTML = `<div class="fp-msg">${lang==='ko'?'검색 중...':'Searching...'}</div>`;
+  try {
+    const { collection, query, where, getDocs } = window._fb;
+    const snap = await getDocs(query(
+      collection(window._fbDb, 'users'),
+      where('nickname', '>=', q),
+      where('nickname', '<=', q + '\uf8ff')
+    ));
+    const users = snap.docs
+      .map(d => d.data())
+      .filter(u => u.uid !== currentUser.id);
+    if (!users.length) {
+      res.innerHTML = `<div class="fp-msg">${lang==='ko'?'검색 결과가 없습니다':'No results found'}</div>`;
+      return;
+    }
+    const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+    res.innerHTML = await Promise.all(users.slice(0, 4).map(async u => {
+      const av      = avatars[u.nickname.length % avatars.length];
+      const already = FriendStore.isFriendSync(u.uid);
+      return `<div class="fp-result-row" style="margin-bottom:5px">
+        <div class="fp-result-av">${av}</div>
+        <div class="fp-result-name">${u.nickname}</div>
+        <button class="fp-add-btn" ${already?'disabled':''} onclick="fpAddFriend('${u.uid}','${u.nickname}',this)">
+          ${already ? tx('added_friend_btn') : tx('add_friend_btn')}
+        </button>
+      </div>`;
+    })).then(rows => rows.join(''));
+  } catch(e) {
+    console.error('[fpDoSearch]', e);
+    res.innerHTML = `<div class="fp-msg">${lang==='ko'?'검색 오류':'Search error'}</div>`;
+  }
+}
+
+async function fpAddFriend(id, nickname, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'추가 중...':'Adding...'; }
+  const added = await FriendStore.add(id, nickname);
+  if (added) {
+    await FriendStore.refresh();
+    renderFriendsList();
+    updateFriendsBadge();
+    showToast('B', tx('fp_add_toast', nickname));
+    buildMarkers();  // 서로 친구 무지개 핀 갱신
+  }
+  if (btn) { btn.textContent = tx('added_friend_btn'); }
+}
+
+async function fpRemoveFriend(id, nickname) {
+  if (!confirm(tx('fp_del_confirm', nickname))) return;
+  await FriendStore.remove(id);
+  if (chatState.friendId === id) closeChat();
+  await FriendStore.refresh();
+  renderFriendsList();
+  updateFriendsBadge();
+  showToast('A', lang==='ko'?`${nickname}님을 친구에서 삭제했습니다`:`Removed ${nickname} from friends`);
+  buildMarkers();
+}
+
+function renderFriendsList() {
+  if (!currentUser) return;
+  const list      = FriendStore._cache;
+  const container = document.getElementById('fpFriendsList');
+  const empty     = document.getElementById('fpEmpty');
+  const lbl       = document.getElementById('fpSectionLbl');
+
+  if (!list.length) {
+    empty.style.display = 'flex'; lbl.style.display = 'none';
+    container.innerHTML = ''; return;
+  }
+  empty.style.display = 'none'; lbl.style.display = 'none';
+
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  const enriched = list.map(f => ({ ...f, mutual: FriendStore.isMutualSync(f.id) }));
+  const byName   = (a, b) => a.nickname.localeCompare(b.nickname, ['ko','en'], { sensitivity:'base' });
+  const mutual   = enriched.filter(f =>  f.mutual).sort(byName);
+  const one_way  = enriched.filter(f => !f.mutual).sort(byName);
+
+  function renderRow(f) {
+    const av       = avatars[f.nickname.length % avatars.length];
+    const isActive = chatState.friendId === f.id;
+    const msgs     = ChatStore.getPreview(f.id);
+    const lastMsg  = msgs.length ? msgs[msgs.length-1] : null;
+    const lastText = lastMsg
+      ? (lastMsg.text.length > 18 ? lastMsg.text.slice(0,18)+'…' : lastMsg.text)
+      : tx('fp_chat_start');
+    const mutualBadge = f.mutual ? `<span class="fr-mutual-badge">${tx('fp_mutual_badge')}</span>` : '';
+    const tempBadge   = f.temp != null ? `<span class="manner-temp ${tempClass(f.temp)}" style="font-size:9px;padding:1px 5px">${f.temp}°</span>` : '';
+    return `<div class="friend-row ${isActive?'active':''} ${f.mutual?'mutual':''}" onclick="openChat('${f.id}','${f.nickname}')">
+      <div class="fr-av">${av}${f.mutual?'<div class="fr-mutual-dot"></div>':''}</div>
+      <div class="fr-info">
+        <div class="fr-name-row"><span class="fr-name">${f.nickname}</span>${mutualBadge}${tempBadge}</div>
+        <div class="fr-sub">${lastText}</div>
+      </div>
+      <button class="fr-remove-btn" onclick="event.stopPropagation();fpRemoveFriend('${f.id}','${f.nickname}')" title="${lang==='ko'?'친구 삭제':'Remove'}">✕</button>
+    </div>`;
+  }
+
+  let html = '';
+  if (mutual.length) {
+    html += `<div class="fp-section-lbl" style="display:block">${tx('fp_mutual_section')} · ${mutual.length}</div>`;
+    html += mutual.map(renderRow).join('');
+  }
+  if (one_way.length) {
+    html += `<div class="fp-section-lbl" style="display:block;margin-top:${mutual.length?10:6}px">${lang==='ko'?'팔로잉':'Following'} · ${one_way.length}</div>`;
+    html += one_way.map(renderRow).join('');
+  }
+  container.innerHTML = html;
+}
+
+async function updateFriendsBadge() {
+  const n = await FriendStore.count();
+  const badge = document.getElementById('friendsBadge');
+  if (!badge) return;
+  badge.textContent = n;
+  badge.classList.toggle('on', n > 0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CHAT  (1:1 localStorage 기반)
+// ═══════════════════════════════════════════════════════════════
+const chatState = { friendId: null, friendNick: null };
+
+function openChat(friendId, friendNick) {
+  chatState.friendId   = friendId;
+  chatState.friendNick = friendNick;
+
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  document.getElementById('cpAv').textContent   = avatars[friendNick.length % avatars.length];
+  document.getElementById('cpName').textContent = friendNick;
+
+  document.getElementById('chatPanel').classList.add('open');
+  document.getElementById('cpInput').focus();
+  renderFriendsList();
+  pushPanel('chat');
+
+  // Firestore 실시간 리스너 시작
+  ChatStore.listen(friendId, (msgs) => {
+    ChatStore.setPreview(friendId, msgs);
+    _renderMsgList(msgs);
+    renderFriendsList(); // 마지막 메시지 미리보기 갱신
+  });
+}
+
+function closeChat(e) {
+  if (e) e.stopPropagation();
+  ChatStore.stopListen();
+  document.getElementById('chatPanel').classList.remove('open');
+  chatState.friendId   = null;
+  chatState.friendNick = null;
+  renderFriendsList();
+  popPanel();
+}
+
+// ── 메시지 렌더 ──────────────────────────────────────────────
+function _renderMsgList(msgs) {
+  const el = document.getElementById('cpMsgs');
+  if (!el) return;
+  if (!msgs.length) {
+    el.innerHTML = `<div class="cp-system">${tx('fp_chat_start')} 👋</div>`;
+    return;
+  }
+  el.innerHTML = msgs.map(m => {
+    const side = m.from === currentUser?.id ? 'me' : 'them';
+    const t    = new Date(m.ts);
+    const time = `${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`;
+    return `<div class="cp-msg ${side}">${m.text}<div class="cp-msg-time">${time}</div></div>`;
+  }).join('');
+  scrollToBottom();
+}
+
+function renderChatMsgs() {
+  // 캐시된 미리보기로 즉시 렌더 (리스너 도착 전 빈 화면 방지)
+  const cached = chatState.friendId ? ChatStore.getPreview(chatState.friendId) : [];
+  _renderMsgList(cached);
+}
+
+async function cpSend() {
+  if (!chatState.friendId || !currentUser) return;
+  const input = document.getElementById('cpInput');
+  const text  = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  try {
+    await ChatStore.send(chatState.friendId, text);
+  } catch(e) {
+    console.error('[cpSend]', e);
+    showToast('A', lang==='ko'?'메시지 전송 실패':'Failed to send');
+    input.value = text; // 실패 시 복원
+  }
+}
+
+// ── 채팅 스크롤 헬퍼 ─────────────────────────────────────────
+function scrollToBottom() {
+  const el = document.getElementById('cpMsgs');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+// ── 모바일 키보드 대응: visualViewport resize ─────────────────
+// 키보드가 올라오면 chatInner 높이를 가시 영역 80%로 재조정
+(function initKeyboardHandler() {
+  if (!window.visualViewport) return;
+  window.visualViewport.addEventListener('resize', () => {
+    const inner = document.getElementById('chatInner');
+    if (!inner) return;
+    const isMobile = window.innerWidth <= 768;
+    const panelOpen = document.getElementById('chatPanel')?.classList.contains('open');
+    if (!isMobile || !panelOpen) return;
+
+    const visH = window.visualViewport.height;   // 키보드 제외 실제 가시 높이
+    const maxH = Math.floor(visH * 0.88);         // 가시 영역의 88%
+    inner.style.height    = maxH + 'px';
+    inner.style.maxHeight = maxH + 'px';
+
+    // 키보드 올라오면 최신 메시지로 스크롤
+    requestAnimationFrame(scrollToBottom);
+  });
+})();
+
+// ── 입력창 포커스 시 자동 스크롤 ────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('cpInput');
+  if (inp) {
+    inp.addEventListener('focus', () => {
+      setTimeout(scrollToBottom, 300);  // 키보드 애니메이션 후 스크롤
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MEETING ATTENDEES → ADD AS FRIEND
+// ═══════════════════════════════════════════════════════════════
+async function renderMeetingAttendees(m) {
+  const wrap = document.getElementById('meetingAttendees');
+  const list = document.getElementById('maList');
+  if (!currentUser) { wrap.style.display = 'none'; return; }
+
+  // 호스트 + 참여자 UID 목록
+  const uids = [...new Set([m.host.id, ...(m.joinedUsers ?? [])])].filter(Boolean);
+  if (!uids.length) { wrap.style.display = 'none'; return; }
+
+  // Firestore에서 닉네임 가져오기
+  const { doc, getDoc } = window._fb;
+  const profiles = await Promise.all(uids.map(async uid => {
+    try {
+      const snap = await getDoc(doc(window._fbDb, 'users', uid));
+      return snap.exists()
+        ? { id: uid, nickname: snap.data().nickname }
+        : { id: uid, nickname: uid.slice(0, 6) + '...' };
+    } catch { return { id: uid, nickname: uid.slice(0, 6) + '...' }; }
+  }));
+
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  list.innerHTML = profiles.map(a => {
+    const isSelf  = a.id === currentUser.id;
+    const isHost  = a.id === m.host.id;
+    const already = FriendStore.isFriendSync(a.id);
+    const av      = avatars[a.nickname.length % avatars.length];
+    const tag     = isHost ? ` 👑` : '';
+    const cls     = (already || isSelf) ? 'ma-chip added' : 'ma-chip';
+    const label   = isSelf
+      ? `${a.nickname}${tag} (나)`
+      : already
+      ? `${a.nickname}${tag} ✓`
+      : `${a.nickname}${tag} +`;
+    const click   = (!isSelf && !already)
+      ? `onclick="maAddFriend('${a.id}','${a.nickname}',this)"`
+      : '';
+    return `<div class="${cls}" ${click}>
+      <div class="ma-chip-av">${av}</div>${label}
+    </div>`;
+  }).join('');
+
+  wrap.style.display = 'block';
+}
+
+async function maAddFriend(id, nickname, el) {
+  await FriendStore.add(id, nickname);
+  await FriendStore.refresh();
+  el.className = 'ma-chip added';
+  el.innerHTML = `<div class="ma-chip-av" style="font-size:9px">✓</div>${nickname} ✓`;
+  el.onclick = null;
+  updateFriendsBadge();
+  renderFriendsList();
+  showToast('B', tx('fp_add_toast', nickname));
+}
+
+document.getElementById('fbInput').addEventListener('input', fbValidate);
+
+// ═══════════════════════════════════════════════════════════════
+//  HISTORY API — 모바일 뒤로가기 제스처 패널 닫기 지원
+//  패널/모달이 열릴 때 pushState로 가짜 히스토리 추가,
+//  뒤로가기 시 popstate로 감지하여 열린 패널만 닫음
+// ═══════════════════════════════════════════════════════════════
+
+// 현재 히스토리 스택에 쌓인 패널 이름 추적
+let _historyStack = [];
+
+// 패널 열릴 때 호출 — 히스토리에 가짜 상태 추가
+function pushPanel(name) {
+  _historyStack.push(name);
+  history.pushState({ panel: name }, '', '#' + name);
+}
+
+// 직접 닫기 버튼으로 패널 닫을 때 호출 — 히스토리 동기화
+function popPanel() {
+  if (_historyStack.length > 0) {
+    _historyStack.pop();
+    history.back();   // pushState로 쌓은 것을 제거
+  }
+}
+
+// 뒤로가기 이벤트 처리
+// 우선순위(위에 있을수록 나중에 닫힘): 채팅 > ES모달 > 생성모달 > Fallback > 바텀시트 > 친구패널
+window.addEventListener('popstate', (e) => {
+  // 스택에서 꺼내기
+  if (_historyStack.length > 0) _historyStack.pop();
+
+  // 열려있는 패널을 우선순위대로 닫기 (history.back 없이 직접 닫음)
+  if (document.getElementById('mannerOv')?.classList.contains('on')) {
+    document.getElementById('mannerOv').classList.remove('on');
+    _mannerMeeting = null;
+    return;
+  }
+  if (document.getElementById('chatPanel')?.classList.contains('open')) {
+    // 채팅창 닫기 (history.back 호출 없이)
+    document.getElementById('chatPanel').classList.remove('open');
+    chatState.friendId = null; chatState.friendNick = null;
+    renderFriendsList();
+    return;
+  }
+  if (document.getElementById('esModalOv')?.classList.contains('on')) {
+    document.getElementById('esModalOv').classList.remove('on');
+    return;
+  }
+  if (document.getElementById('createOv')?.classList.contains('on')) {
+    closeCreate();
+    return;
+  }
+  if (document.getElementById('fbOv')?.classList.contains('on')) {
+    document.getElementById('fbOv').classList.remove('on');
+    return;
+  }
+  if (document.getElementById('bs')?.classList.contains('on')) {
+    closeBS();
+    return;
+  }
+  if (fpOpen) {
+    // 친구 패널 닫기
+    fpOpen = false;
+    document.getElementById('friendsPanel').classList.remove('open');
+    document.getElementById('friendsTab').classList.remove('open');
+    document.body.classList.remove('fp-open');
+    return;
+  }
+  // 아무것도 열려있지 않으면 브라우저 기본 동작 (앱 종료 등)
+  // popstate가 이미 발생했으므로 추가 history.back() 불필요
+});
+// 초기 모바일 헤더 높이 계산
+updateMobileHeaderHeight();
+
+// ═══════════════════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════════════════
+const _toastT = {};
+function showToast(id, msg, dur = 5000) {
+  const el = document.getElementById('toast' + id);
+  if (!el) return;
+  el.textContent = msg; el.classList.add('on');
+  clearTimeout(_toastT[id]);
+  _toastT[id] = setTimeout(() => el.classList.remove('on'), dur);
+}
+
+// ── HUD 단위 레이블 업데이트 ─────────────────────────────────
+// 드롭박스 선택(cat)과 내 엔진스코어 종목(globalResult.cat) 모두 고려.
+// 드롭박스가 'all'이면 globalResult.cat 기준, 아니면 드롭박스 기준.
+// ── 채팅 나가기 (대화 삭제 + 닫기) ─────────────────────────
+async function leaveChat(e) {
+  if (e) e.stopPropagation();
+  const fid   = chatState.friendId;
+  const fname = chatState.friendNick;
+  if (!fid) { closeChat(); return; }
+  const ok = confirm(lang === 'ko'
+    ? `${fname}님과의 대화 내용을 모두 삭제하고 나가시겠어요?`
+    : `Delete all messages with ${fname} and leave?`);
+  if (!ok) return;
+  try {
+    await ChatStore.clear(fid);
+    ChatStore.setPreview(fid, []);
+    closeChat();
+    showToast('A', lang === 'ko' ? '대화 내용이 삭제되었습니다.' : 'Conversation deleted.');
+  } catch(err) {
+    console.error('[leaveChat]', err);
+    showToast('A', lang==='ko'?'삭제 중 오류 발생':'Error deleting');
+  }
+}
+
+// ── 첨부파일 관리 ────────────────────────────────────────────
+let _attachFiles = [];   // { file, id } 배열
+
+function _renderAttachList() {
+  const el = document.getElementById('attachList');
+  if (!el) return;
+  if (!_attachFiles.length) { el.innerHTML = ''; return; }
+  el.innerHTML = _attachFiles.map(({file, id}) => {
+    const isGpx  = file.name.toLowerCase().endsWith('.gpx');
+    const icon   = isGpx ? '🗺️' : '🖼️';
+    const size   = file.size < 1024*1024
+      ? `${(file.size/1024).toFixed(0)}KB`
+      : `${(file.size/1024/1024).toFixed(1)}MB`;
+    return `<div class="attach-item">
+      <span class="attach-item-icon">${icon}</span>
+      <span class="attach-item-name">${file.name}</span>
+      <span class="attach-item-size">${size}</span>
+      <button class="attach-item-del" onclick="removeAttach('${id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function handleAttachSelect(files) {
+  [...files].forEach(f => {
+    if (_attachFiles.length >= 5) { showToast('A', lang === 'ko' ? '파일은 최대 5개까지 첨부 가능합니다.' : 'Max 5 files allowed.'); return; }
+    if (f.size > 20 * 1024 * 1024) { showToast('A', lang === 'ko' ? `${f.name}: 20MB 이하 파일만 첨부 가능합니다.` : `${f.name}: max 20MB.`); return; }
+    _attachFiles.push({ file: f, id: Math.random().toString(36).slice(2) });
+  });
+  document.getElementById('attachDrop').classList.remove('drag');
+  _renderAttachList();
+}
+
+function handleAttachDrop(e) {
+  e.preventDefault();
+  document.getElementById('attachDrop').classList.remove('drag');
+  handleAttachSelect(e.dataTransfer.files);
+}
+
+function removeAttach(id) {
+  _attachFiles = _attachFiles.filter(a => a.id !== id);
+  _renderAttachList();
+}
+
+function _resetAttach() {
+  _attachFiles = [];
+  const inp = document.getElementById('fAttach');
+  if (inp) inp.value = '';
+  _renderAttachList();
+}
+// ═══════════════════════════════════════════════════════════════
+// ── 빈 상태 체크 ─────────────────────────────────────────────
+function _checkEmptyState() {
+  const el  = document.getElementById('mapEmpty');
+  const txt = document.getElementById('mapEmptyTxt');
+  const btn = el?.querySelector('.map-empty-btn');
+  if (!el) return;
+  const visible = Object.keys(leafletMarkers).length;
+  el.classList.toggle('on', visible === 0);
+  if (txt) {
+    const cat = CatFilter.cat;
+    const catStr = cat === 'ride'
+      ? (lang === 'ko' ? '라이딩' : 'cycling')
+      : cat === 'run'
+      ? (lang === 'ko' ? '러닝' : 'running')
+      : '';
+    txt.innerHTML = lang === 'ko'
+      ? `현재 주변에 ${catStr ? catStr + ' ' : ''}모임이 없어요<br>직접 만들어보세요!`
+      : `No ${catStr} meetings nearby<br>Why not create one?`;
+  }
+  if (btn) btn.textContent = lang === 'ko' ? '+ 모임 만들기' : '+ Create Meeting';
+}
+
+// ── 러닝 등급 분류 (peak1km 초/km 기준) ──────────────────────
+
+// 초/km → "M'SS\"/km" 표시용
+
+function openEsModal() {
+  _updateEsModal();
+  document.getElementById('esModalOv').classList.add('on');
+  pushPanel('esmodal');
+}
+function closeEsModal() {
+  document.getElementById('esModalOv').classList.remove('on');
+  popPanel();
+}
+function _updateEsModal() {
+  const ko = lang === 'ko';
+  const rows = [
+    ['esModalSub',      ko ? '나의 실력 지수 · 모임 난이도 매칭 기준' : 'My skill index · Meeting difficulty matching basis'],
+    ['esPri',           ko ? '🥇 점수 입력 방법' : '🥇 How to set your score'],
+    ['esPri1',          ko ? 'HUD 점수를 클릭하여 <strong>직접 입력</strong>\n러닝: 최고 1km 페이스 (예: 4:30)\n라이딩: w/kg (예: 3.2)' : 'Click HUD score to <strong>enter manually</strong>\nRun: best 1km pace (e.g. 4:30)\nRide: w/kg (e.g. 3.2)'],
+    ['esPri2',          ko ? '점수 없이 <strong>구경 모드</strong>로 시작 가능\n마커 색상이 회색으로 표시됨' : 'Start in <strong>browse mode</strong> without a score\nAll markers shown in gray'],
+    ['esPri3',          ko ? '입력한 점수는 <strong>기기에 저장</strong>됨\n다음 접속 시 자동 복원' : 'Your score is <strong>saved on device</strong>\nRestored automatically next time'],
+    ['esCalcTitle',     ko ? '🏃 러닝' : '🏃 Running'],
+    ['esRunFormula',    ko ? '나의 <strong>최고 1km 페이스</strong>를 직접 입력\n예: 4:30 → 4분 30초/km' : 'Enter your <strong>best 1km pace</strong>\ne.g. 4:30 → 4 min 30 sec/km'],
+    ['esRunGradeTable', ko ? "엘리트 &lt;3'30\" / 상급 &lt;4'30\" / 중급 &lt;5'30\" / 입문 ≥5'30\"" : "Elite &lt;3'30\" / Advanced &lt;4'30\" / Intermediate &lt;5'30\" / Beginner ≥5'30\""],
+    ['esRideTitle',     ko ? '🚴 라이딩' : '🚴 Cycling'],
+    ['esRidePower',     ko ? '나의 <strong>FTP 기반 w/kg</strong>을 직접 입력\n예: 3.2 → 3.2 w/kg' : 'Enter your <strong>FTP-based w/kg</strong>\ne.g. 3.2 → 3.2 w/kg'],
+    ['esRideCond',      ko ? '입문 &lt;2.5 / 중급 &lt;3.2 / 상급 &lt;4.2 / 엘리트 ≥4.2 w/kg' : 'Beginner &lt;2.5 / Inter. &lt;3.2 / Advanced &lt;4.2 / Elite ≥4.2 w/kg'],
+    ['esMatchTitle',    ko ? '🎯 매칭 기준 (ratio)' : '🎯 Matching Criteria (ratio)'],
+    ['esMatchGold',     ko ? '나의 점수 ÷ 호스트 점수 = <strong>0.95 ~ 1.05</strong>\n가장 이상적인 페이스 매치' : 'My score ÷ Host score = <strong>0.95 ~ 1.05</strong>\nIdeal pace match'],
+    ['esMatchWarn',     ko ? 'ratio &lt; 0.60 → 완전 오버페이스\n무리하게 따라가면 <strong>부상 위험</strong>' : 'ratio &lt; 0.60 → Way overpaced\n<strong>Risk of injury</strong> if you push too hard'],
+    ['esCloseBtn',      ko ? '확인' : 'Got it'],
+  ];
+  rows.forEach(([id, html]) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html.replace(/\n/g, '<br>');
+  });
+}
+
+// ── 모바일 헤더 높이 → CSS 변수 --mh 동기화 ─────────────────
+function updateMobileHeaderHeight() {
+  const h = document.getElementById('mobileHeader')?.offsetHeight ?? 0;
+  document.documentElement.style.setProperty('--mh', h + 'px');
+}
+// resize 시 재계산
+window.addEventListener('resize', updateMobileHeaderHeight);
+
+function updateHudUnit() {
+  const el = document.getElementById('hudUnit');
+  if (!el) return;
+  // CatFilter 선택값 우선, 없으면 내 점수 종목 기준
+  const displayCat = CatFilter.cat !== 'all'
+    ? CatFilter.cat
+    : (globalResult?.cat ?? null);
+  if      (displayCat === 'ride') el.textContent = 'w/kg';
+  else if (displayCat === 'run')  el.textContent = 'min/km';
+  else                            el.textContent = '';
+}
+function onResolved() {
+  try {
+  const s = globalResult?.score;
+
+  // HUD 점수 표시
+  let displayScore;
+  if (s !== null && s !== undefined) {
+    if (globalResult?.cat === 'run') {
+      const paceSec = globalResult?.bestPaceSec ?? Math.round(1000000 / s);
+      const paceStr = secToPaceStr(paceSec);
+      displayScore  = paceStr.replace('"/km', '');
+    } else {
+      displayScore = s;
+    }
+  } else {
+    displayScore = '—';
+  }
+  document.getElementById('hudScore').textContent = displayScore;
+
+  const badge = document.getElementById('hudBadge');
+  if      (globalResult?.source === 'manual')  { badge.textContent = '수동입력'; badge.className = 'sp-badge manual'; }
+  else if (globalResult?.source === 'gray')    { badge.textContent = '구경모드'; badge.className = 'sp-badge warn'; }
+  else                                         { badge.textContent = `수동입력`; badge.className = 'sp-badge'; }
+
+  // HUD 로고 아이콘 — CatFilter 기준
+  const logoIcon = document.querySelector('.logo-icon');
+  if (logoIcon) {
+    const cat = CatFilter.cat !== 'all' ? CatFilter.cat : (globalResult?.cat ?? 'run');
+    logoIcon.textContent = cat === 'ride' ? '🚴' : '🏃';
+  }
+
+  if (globalResult?.source === 'manual') showToast('B', tx('manual_msg', globalResult.score));
+  if (globalResult?.source === 'gray')   showToast('B', tx('gray_msg'));
+
+  } catch(e) { console.error('[onResolved error]', e); }
+
+  // try-catch 밖에서 실행 — 항상 실행 보장
+  updateHudUnit();
+  buildMarkers();
+  if (currentMeeting) renderBS(currentMeeting);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT  — split into auth check + map boot
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  SCORE STORE  —  종목별 점수를 분리 저장
+//  { run: EngineResult|null, ride: EngineResult|null }
+//  • 스트라바 자동계산값 또는 수동 입력값
+//  • setCat() 호출 시 해당 종목 결과를 globalResult에 적용
+// ═══════════════════════════════════════════════════════════════
+const ScoreStore = {
+  run:  null,
+  ride: null,
+
+  // ── localStorage 키 ──────────────────────────────────────────
+  _key: cat => `mf_manual_${cat}`,   // mf_manual_run / mf_manual_ride
+
+  // 종목별 스트라바 자동계산 초기화 + 저장된 수동값 복원
+  boot() {
+    // 수동 입력값만 복원 (Strava 자동계산 제거됨)
+    ['run', 'ride'].forEach(cat => {
+      const saved = localStorage.getItem(this._key(cat));
+      if (saved) {
+        const score = parseFloat(saved);
+        if (isFinite(score) && score > 0) {
+          this[cat] = { score, cat, source: 'manual', algo: cat === 'ride' ? 'manual_ride' : 'manual_run', breakdown: [], warnings: [], skipped: 0, hasPower: false, hasWaw: false };
+        }
+      }
+    });
+  },
+
+  // 수동 입력값 저장 (해당 종목만) + localStorage 영속
+  setManual(score, cat) {
+    this[cat] = EngineScore.createManual(score, cat);
+    localStorage.setItem(this._key(cat), score);
+  },
+
+  // 수동 입력값 초기화
+  clearManual(cat) {
+    localStorage.removeItem(this._key(cat));
+  },
+
+  // 현재 필터 종목에 맞는 결과 반환
+  get(cat) {
+    if (cat === 'all') return this.run ?? this.ride ?? null;
+    return this[cat] ?? null;
+  },
+};
+
+function bootMap() {
+  ScoreStore.boot();
+  const cat = CatFilter.cat;
+  globalResult = ScoreStore.get(cat);
+  onResolved();
+}
+
+(function boot() {
+  // Firebase Auth의 onAuthStateChanged가 세션 복원을 처리함
+  if (window._pendingAuthUser) {
+    onLoginSuccess(window._pendingAuthUser);
+    window._pendingAuthUser = null;
+  }
+})();
+</script>
+</body>
+</html>
