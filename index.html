@@ -1170,6 +1170,9 @@ body.fp-open #chatPanel{right:260px;}
   align-self:center;font-family:var(--mono);font-size:8px;
   color:var(--muted);padding:2px 0;
 }
+.cp-msg-wrap{ display:flex;flex-direction:column; }
+.cp-msg-wrap.me{ align-items:flex-end; }
+.cp-msg-wrap.them{ align-items:flex-start; }
 .cp-system{
   align-self:center;font-family:var(--mono);font-size:9px;
   color:var(--muted);font-style:italic;
@@ -1322,6 +1325,102 @@ body.fp-open #chatPanel{right:260px;}
 .cp-leave:hover{background:rgba(255,59,48,.2);border-color:#ff3b30;}
 .cp-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:4px;}
 .cp-close:hover{color:var(--text);}
+
+/* ─── 그룹채팅 초대 버튼 ──────────────────── */
+.cp-invite{
+  font-family:var(--mono);font-size:9px;font-weight:700;
+  padding:4px 9px;border-radius:8px;
+  background:rgba(0,245,160,.1);border:1px solid rgba(0,245,160,.3);
+  color:var(--accent);cursor:pointer;transition:all .18s;white-space:nowrap;
+}
+.cp-invite:hover{background:rgba(0,245,160,.2);}
+
+/* ─── 참여자 목록 (채팅 상단) ─────────────── */
+.cp-members{
+  display:flex;align-items:center;gap:4px;
+  padding:6px 14px;border-bottom:1px solid var(--border);
+  overflow-x:auto;scrollbar-width:none;flex-shrink:0;
+}
+.cp-members::-webkit-scrollbar{display:none;}
+.cp-member-chip{
+  display:flex;align-items:center;gap:4px;
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:99px;padding:3px 8px 3px 5px;
+  font-family:var(--mono);font-size:9px;white-space:nowrap;flex-shrink:0;
+}
+.cp-member-av{font-size:11px;}
+
+/* ─── 초대 모달 ───────────────────────────── */
+.invite-modal-ov{
+  position:fixed;inset:0;z-index:1100;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
+  display:flex;align-items:flex-end;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.invite-modal-ov.on{opacity:1;pointer-events:all;}
+.invite-modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  width:min(100%,480px);max-height:75vh;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+.invite-modal-head{
+  padding:18px 18px 12px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.invite-modal-title{
+  font-family:var(--mono);font-size:13px;font-weight:800;color:var(--accent);
+}
+.invite-search{
+  padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
+  display:flex;gap:8px;
+}
+.invite-search-input{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:9px;padding:7px 10px;font-family:var(--mono);
+  font-size:11px;color:var(--text);outline:none;
+}
+.invite-search-input:focus{border-color:var(--a2);}
+.invite-search-btn{
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  padding:7px 12px;border-radius:9px;
+  background:var(--a2);color:#000;border:none;cursor:pointer;
+}
+.invite-list{flex:1;overflow-y:auto;padding:8px 0;}
+.invite-item{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 16px;cursor:pointer;transition:background .15s;
+}
+.invite-item:hover{background:var(--s2);}
+.invite-item.selected{background:rgba(0,245,160,.08);}
+.invite-item-av{
+  width:34px;height:34px;border-radius:50%;
+  background:linear-gradient(135deg,var(--a2),var(--accent));
+  display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;
+}
+.invite-item-name{flex:1;font-family:var(--mono);font-size:12px;font-weight:600;}
+.invite-item-check{
+  width:20px;height:20px;border-radius:50%;
+  border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;transition:all .18s;flex-shrink:0;
+}
+.invite-item.selected .invite-item-check{
+  background:var(--accent);border-color:var(--accent);color:#000;
+}
+.invite-footer{
+  padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;
+}
+.invite-submit{
+  width:100%;padding:12px;border-radius:12px;
+  background:var(--accent);color:#000;
+  font-family:var(--mono);font-size:12px;font-weight:800;
+  border:none;cursor:pointer;transition:opacity .18s;
+}
+.invite-submit:hover{opacity:.88;}
+.invite-submit:disabled{opacity:.4;cursor:default;}
 
 /* ─── 첨부파일 UI ───────────────────────── */
 .attach-drop{
@@ -1571,15 +1670,41 @@ body.fp-open #chatPanel{right:260px;}
     <div class="cp-av" id="cpAv">😊</div>
     <div class="cp-name" id="cpName">—</div>
     <div class="cp-header-btns">
+      <button class="cp-invite" onclick="openInviteModal()" id="cpInviteBtn" title="초대">👥 초대</button>
       <button class="cp-leave" onclick="leaveChat(event)" id="cpLeaveBtn" title="나가기">나가기</button>
       <button class="cp-close" onclick="closeChat(event)" title="닫기">✕</button>
     </div>
   </div>
+  <!-- 참여자 목록 (그룹일 때 표시) -->
+  <div class="cp-members" id="cpMembers" style="display:none"></div>
   <div class="cp-msgs" id="cpMsgs"></div>
   <div class="cp-input-row">
     <input class="cp-input" id="cpInput" placeholder="메시지 입력..." onkeydown="if(event.key==='Enter')cpSend()">
     <button class="cp-send-btn" onclick="cpSend()">↑</button>
   </div>
+  </div>
+</div>
+
+<!-- ── 초대 모달 ── -->
+<div class="invite-modal-ov" id="inviteModalOv">
+  <div class="invite-modal">
+    <div class="invite-modal-head">
+      <span class="invite-modal-title">👥 대화 초대</span>
+      <button onclick="closeInviteModal()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div class="invite-search">
+      <input class="invite-search-input" id="inviteSearchInput"
+             placeholder="닉네임 검색..."
+             oninput="inviteOnInput()"
+             onkeydown="if(event.key==='Enter')inviteDoSearch()">
+      <button class="invite-search-btn" onclick="inviteDoSearch()">검색</button>
+    </div>
+    <div class="invite-list" id="inviteList"></div>
+    <div class="invite-footer">
+      <button class="invite-submit" id="inviteSubmitBtn" onclick="submitInvite()" disabled>
+        초대하기
+      </button>
+    </div>
   </div>
 </div>
 
@@ -3333,7 +3458,134 @@ function fbValidate() {
 //  FRIEND STORE  — localStorage 기반
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-//  MANNER TEMPERATURE SYSTEM  —  매너 온도
+//  그룹 채팅 초대 모달
+// ═══════════════════════════════════════════════════════════════
+let _inviteSelected = new Map();  // uid → nickname
+
+function openInviteModal() {
+  _inviteSelected = new Map();
+  document.getElementById('inviteSearchInput').value = '';
+  document.getElementById('inviteSubmitBtn').disabled = true;
+
+  // 친구 목록으로 초기 렌더
+  _renderInviteList(FriendStore._cache.filter(f => f.id !== chatState.friendId));
+
+  document.getElementById('inviteModalOv').classList.add('on');
+  pushPanel('invite');
+}
+
+function closeInviteModal() {
+  document.getElementById('inviteModalOv').classList.remove('on');
+  popPanel();
+}
+
+function _renderInviteList(users) {
+  const el = document.getElementById('inviteList');
+  if (!users.length) {
+    el.innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted)">${lang==='ko'?'검색 결과 없음':'No results'}</div>`;
+    return;
+  }
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  el.innerHTML = users.map(u => {
+    const av       = avatars[u.nickname.length % avatars.length];
+    const selected = _inviteSelected.has(u.id);
+    return `<div class="invite-item ${selected?'selected':''}" onclick="toggleInviteSelect('${u.id}','${u.nickname}',this)">
+      <div class="invite-item-av">${av}</div>
+      <div class="invite-item-name">${u.nickname}</div>
+      <div class="invite-item-check">${selected?'✓':''}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleInviteSelect(uid, nickname, el) {
+  if (_inviteSelected.has(uid)) {
+    _inviteSelected.delete(uid);
+    el.classList.remove('selected');
+    el.querySelector('.invite-item-check').textContent = '';
+  } else {
+    _inviteSelected.set(uid, nickname);
+    el.classList.add('selected');
+    el.querySelector('.invite-item-check').textContent = '✓';
+  }
+  document.getElementById('inviteSubmitBtn').disabled = _inviteSelected.size === 0;
+  document.getElementById('inviteSubmitBtn').textContent =
+    _inviteSelected.size > 0
+      ? `${lang==='ko'?'초대하기':'Invite'} (${_inviteSelected.size}명)`
+      : (lang==='ko'?'초대하기':'Invite');
+}
+
+async function inviteOnInput() {
+  const q = document.getElementById('inviteSearchInput').value.trim();
+  if (!q) {
+    _renderInviteList(FriendStore._cache.filter(f => f.id !== chatState.friendId));
+    return;
+  }
+  // 친구 목록에서 필터링
+  const filtered = FriendStore._cache.filter(f =>
+    f.id !== chatState.friendId &&
+    f.nickname.toLowerCase().includes(q.toLowerCase())
+  );
+  _renderInviteList(filtered);
+}
+
+async function inviteDoSearch() {
+  const q = document.getElementById('inviteSearchInput').value.trim();
+  if (!q) return;
+  const { collection, query, where, getDocs } = window._fb;
+  const snap = await getDocs(query(
+    collection(window._fbDb, 'users'),
+    where('nickname', '>=', q),
+    where('nickname', '<=', q + '\uf8ff')
+  ));
+  const users = snap.docs
+    .map(d => ({ id: d.data().uid, nickname: d.data().nickname }))
+    .filter(u => u.id !== currentUser.id && u.id !== chatState.friendId);
+  _renderInviteList(users);
+}
+
+async function submitInvite() {
+  if (!_inviteSelected.size) return;
+  const btn = document.getElementById('inviteSubmitBtn');
+  btn.disabled = true; btn.textContent = lang==='ko'?'처리 중...':'Processing...';
+
+  try {
+    const newUids  = [..._inviteSelected.keys()];
+    const newNames = Object.fromEntries(_inviteSelected);
+
+    // 현재 채팅방 ID (1:1 direct ID)
+    const directId = [currentUser.id, chatState.friendId].sort().join('_');
+
+    // 기존 멤버 + 나 + 대화 상대 + 새 초대 멤버
+    const allNames = {
+      [currentUser.id]:    currentUser.nickname,
+      [chatState.friendId]: chatState.friendNick,
+      ...newNames,
+    };
+    const allUids = [...new Set([currentUser.id, chatState.friendId, ...newUids])];
+
+    await ChatStore.addMembers(directId, newUids, allNames);
+    chatState.groupId = directId;
+
+    // 시스템 메시지
+    const { collection, addDoc, serverTimestamp } = window._fb;
+    const invitedNames = [..._inviteSelected.values()].join(', ');
+    await addDoc(collection(window._fbDb, 'chats', directId, 'messages'), {
+      from: 'system',
+      fromName: 'system',
+      text: `${currentUser.nickname}님이 ${invitedNames}님을 초대했습니다.`,
+      ts: serverTimestamp(),
+    });
+
+    // 리스너 재시작 (같은 chatId라 그대로)
+    _renderMembers(allUids, allNames);
+    closeInviteModal();
+    showToast('B', lang==='ko'?`✓ ${invitedNames}님을 초대했습니다`:`✓ Invited ${invitedNames}`);
+  } catch(e) {
+    console.error('[submitInvite]', e);
+    showToast('A', lang==='ko'?'초대 중 오류 발생':'Error inviting');
+    btn.disabled = false;
+  }
+}
 //  기본값 36.5°C, Firestore users/{uid}.mannerTemp 에 저장
 // ═══════════════════════════════════════════════════════════════
 
@@ -3610,24 +3862,36 @@ const FriendStore = {
   isMutualSync(friendId)  { return this._mutualCache.has(friendId); },
 };
 
-// ─── Chat Store — Firestore 실시간 ──────────────────────────
+// ─── Chat Store — Firestore 실시간 (1:1 + 그룹) ─────────────
 const ChatStore = {
-  // 채팅방 ID: 두 UID 정렬 후 합침 (양방향 동일)
-  _chatId(friendId) {
+  // 1:1 채팅방 ID
+  _directId(friendId) {
     return [currentUser?.id ?? 'anon', friendId].sort().join('_');
+  },
+
+  // 현재 채팅방 ID (1:1 또는 그룹)
+  _chatId(friendId) {
+    // chatState에 그룹 ID가 있으면 그걸 사용
+    return chatState.groupId || this._directId(friendId);
   },
 
   // 메시지 전송
   async send(friendId, text) {
-    const { collection, addDoc, serverTimestamp } = window._fb;
+    const { collection, addDoc, serverTimestamp, doc, updateDoc } = window._fb;
     const chatId = this._chatId(friendId);
     await addDoc(
       collection(window._fbDb, 'chats', chatId, 'messages'),
-      { from: currentUser.id, text, ts: serverTimestamp() }
+      { from: currentUser.id, fromName: currentUser.nickname, text, ts: serverTimestamp() }
     );
+    // 마지막 메시지 업데이트
+    try {
+      await updateDoc(doc(window._fbDb, 'chats', chatId), {
+        lastMessage: text, lastAt: serverTimestamp()
+      });
+    } catch(e) {}
   },
 
-  // 채팅 내용 전체 삭제 (나가기)
+  // 채팅 내용 삭제
   async clear(friendId) {
     const { collection, getDocs, deleteDoc } = window._fb;
     const chatId = this._chatId(friendId);
@@ -3635,10 +3899,9 @@ const ChatStore = {
     await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
   },
 
-  // 실시간 리스너 (openChat에서 호출)
+  // 실시간 리스너
   _unsub: null,
   listen(friendId, onUpdate) {
-    // 기존 리스너 해제
     if (this._unsub) { this._unsub(); this._unsub = null; }
     const { collection, query, orderBy, onSnapshot } = window._fb;
     const chatId = this._chatId(friendId);
@@ -3648,10 +3911,11 @@ const ChatStore = {
     );
     this._unsub = onSnapshot(q, snap => {
       const msgs = snap.docs.map(d => ({
-        id:   d.id,
-        from: d.data().from,
-        text: d.data().text,
-        ts:   d.data().ts?.toMillis?.() ?? Date.now(),
+        id:       d.id,
+        from:     d.data().from,
+        fromName: d.data().fromName ?? '',
+        text:     d.data().text,
+        ts:       d.data().ts?.toMillis?.() ?? Date.now(),
       }));
       onUpdate(msgs);
     });
@@ -3660,10 +3924,59 @@ const ChatStore = {
     if (this._unsub) { this._unsub(); this._unsub = null; }
   },
 
-  // 마지막 메시지 미리보기용 (캐시)
+  // 그룹 채팅방 생성
+  async createGroup(memberUids, memberNames) {
+    const { collection, addDoc, serverTimestamp } = window._fb;
+    const ref = await addDoc(collection(window._fbDb, 'chats'), {
+      type: 'group',
+      members: memberUids,
+      memberNames,
+      createdBy: currentUser.id,
+      createdAt: serverTimestamp(),
+      lastMessage: '',
+      lastAt: serverTimestamp(),
+    });
+    return ref.id;
+  },
+
+  // 기존 채팅방에 멤버 추가 (1:1 → 그룹 전환)
+  async addMembers(chatId, newUids, newNames) {
+    const { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } = window._fb;
+    const ref  = doc(window._fbDb, 'chats', chatId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await updateDoc(ref, {
+        type: 'group',
+        members:     arrayUnion(...newUids),
+        memberNames: { ...snap.data().memberNames, ...newNames },
+      });
+    } else {
+      // 1:1 채팅방 문서가 없는 경우 새로 생성
+      const allUids  = [...new Set([...chatId.split('_'), ...newUids])];
+      const allNames = { [currentUser.id]: currentUser.nickname, ...newNames };
+      await setDoc(ref, {
+        type: 'group',
+        members: allUids,
+        memberNames: allNames,
+        createdBy: currentUser.id,
+        createdAt: serverTimestamp(),
+        lastMessage: '', lastAt: serverTimestamp(),
+      });
+    }
+  },
+
+  // 채팅방 멤버 정보 가져오기
+  async getMembers(chatId) {
+    const { doc, getDoc } = window._fb;
+    const snap = await getDoc(doc(window._fbDb, 'chats', chatId));
+    if (!snap.exists()) return null;
+    return snap.data();
+  },
+
+  // 미리보기 캐시
   _preview: {},
-  setPreview(friendId, msgs) { this._preview[friendId] = msgs; },
-  getPreview(friendId)       { return this._preview[friendId] ?? []; },
+  setPreview(friendId, msgs) { this._preview[this._chatId(friendId)] = msgs; },
+  getPreview(friendId)       { return this._preview[this._chatId(friendId)] ?? []; },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -3818,15 +4131,17 @@ async function updateFriendsBadge() {
 // ═══════════════════════════════════════════════════════════════
 //  CHAT  (1:1 localStorage 기반)
 // ═══════════════════════════════════════════════════════════════
-const chatState = { friendId: null, friendNick: null };
+const chatState = { friendId: null, friendNick: null, groupId: null };
 
 function openChat(friendId, friendNick) {
   chatState.friendId   = friendId;
   chatState.friendNick = friendNick;
+  chatState.groupId    = null;  // 1:1은 groupId 없음
 
   const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
   document.getElementById('cpAv').textContent   = avatars[friendNick.length % avatars.length];
   document.getElementById('cpName').textContent = friendNick;
+  document.getElementById('cpMembers').style.display = 'none';
 
   document.getElementById('chatPanel').classList.add('open');
   document.getElementById('cpInput').focus();
@@ -3837,8 +4152,21 @@ function openChat(friendId, friendNick) {
   ChatStore.listen(friendId, (msgs) => {
     ChatStore.setPreview(friendId, msgs);
     _renderMsgList(msgs);
-    renderFriendsList(); // 마지막 메시지 미리보기 갱신
+    renderFriendsList();
   });
+
+  // 혹시 이미 그룹 채팅방이 있는지 확인
+  _checkExistingGroup(friendId);
+}
+
+// 기존에 그룹으로 전환된 채팅방 있는지 확인
+async function _checkExistingGroup(friendId) {
+  const directId = [currentUser.id, friendId].sort().join('_');
+  const data = await ChatStore.getMembers(directId);
+  if (data?.type === 'group') {
+    chatState.groupId = directId;
+    _renderMembers(data.members, data.memberNames);
+  }
 }
 
 function closeChat(e) {
@@ -3847,6 +4175,7 @@ function closeChat(e) {
   document.getElementById('chatPanel').classList.remove('open');
   chatState.friendId   = null;
   chatState.friendNick = null;
+  chatState.groupId    = null;
   renderFriendsList();
   popPanel();
 }
@@ -3859,13 +4188,39 @@ function _renderMsgList(msgs) {
     el.innerHTML = `<div class="cp-system">${tx('fp_chat_start')} 👋</div>`;
     return;
   }
+  const isGroup = !!chatState.groupId;
   el.innerHTML = msgs.map(m => {
     const side = m.from === currentUser?.id ? 'me' : 'them';
     const t    = new Date(m.ts);
     const time = `${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`;
-    return `<div class="cp-msg ${side}">${m.text}<div class="cp-msg-time">${time}</div></div>`;
+    // 그룹 채팅에서 상대방 메시지엔 닉네임 표시
+    const nameTag = (isGroup && side === 'them' && m.fromName)
+      ? `<div style="font-size:9px;color:var(--muted);margin-bottom:2px;font-family:var(--mono)">${m.fromName}</div>`
+      : '';
+    return `<div class="cp-msg-wrap ${side}">${nameTag}<div class="cp-msg ${side}">${m.text}<div class="cp-msg-time">${time}</div></div></div>`;
   }).join('');
   scrollToBottom();
+}
+
+// ── 참여자 목록 렌더 ─────────────────────────────────────────
+function _renderMembers(uids, names) {
+  const el = document.getElementById('cpMembers');
+  if (!el) return;
+  const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
+  el.innerHTML = uids.map(uid => {
+    const nick = names?.[uid] ?? uid.slice(0,6);
+    const av   = avatars[nick.length % avatars.length];
+    const isMe = uid === currentUser?.id;
+    return `<div class="cp-member-chip">
+      <span class="cp-member-av">${av}</span>
+      <span>${nick}${isMe ? ' (나)' : ''}</span>
+    </div>`;
+  }).join('');
+  el.style.display = 'flex';
+  // 채팅방 이름도 업데이트
+  const names2 = uids.filter(u => u !== currentUser?.id).map(u => names?.[u] ?? u.slice(0,6));
+  document.getElementById('cpName').textContent = names2.join(', ');
+  document.getElementById('cpAv').textContent = '👥';
 }
 
 function renderChatMsgs() {
@@ -4016,6 +4371,10 @@ window.addEventListener('popstate', (e) => {
   if (_historyStack.length > 0) _historyStack.pop();
 
   // 열려있는 패널을 우선순위대로 닫기 (history.back 없이 직접 닫음)
+  if (document.getElementById('inviteModalOv')?.classList.contains('on')) {
+    document.getElementById('inviteModalOv').classList.remove('on');
+    return;
+  }
   if (document.getElementById('mannerOv')?.classList.contains('on')) {
     document.getElementById('mannerOv').classList.remove('on');
     _mannerMeeting = null;
