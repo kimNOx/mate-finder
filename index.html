@@ -178,16 +178,9 @@ window._startMeetingsListener = function() {
         },
       };
     });
-    // 무지개 핀: 친구 캐시 갱신 후 마커 렌더
-    if (typeof window.FriendStore !== 'undefined' && window.FriendStore.refresh) {
-      window.FriendStore.refresh().then(() => {
-        if (typeof window.buildMarkers === 'function') window.buildMarkers();
-        if (typeof window._checkEmptyState === 'function') window._checkEmptyState();
-      });
-    } else {
-      if (typeof window.buildMarkers === 'function') window.buildMarkers();
-      if (typeof window._checkEmptyState === 'function') window._checkEmptyState();
-    }
+    // 마커 바로 렌더 (친구 캐시는 이미 로그인 시 로드됨)
+    if (typeof window.buildMarkers === 'function') window.buildMarkers();
+    if (typeof window._checkEmptyState === 'function') window._checkEmptyState();
   }, err => console.error('[meetings listener]', err));
 };
 </script>
@@ -253,7 +246,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .uc-logout{font-family:var(--mono);font-size:9px;color:var(--muted);}
 
 /* ─── FAB ─────────────────────────────────── */
-.fab{position:fixed;right:20px;bottom:100px;z-index:500;
+.fab{position:fixed;right:20px;bottom:100px;z-index:510;
   width:52px;height:52px;border-radius:16px;border:none;cursor:pointer;
   background:linear-gradient(135deg,var(--accent),var(--a2));
   display:flex;align-items:center;justify-content:center;font-size:22px;
@@ -1504,7 +1497,8 @@ body.fp-open #chatPanel{right:260px;}
 /* ─── EMPTY STATE (주변 모임 없음) ────── */
 .map-empty{
   position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
-  z-index:450;pointer-events:none;
+  z-index:450;
+  pointer-events:none;  /* 전체는 클릭 통과 */
   display:flex;flex-direction:column;align-items:center;gap:8px;
   opacity:0;transition:opacity .3s;
 }
@@ -1513,7 +1507,7 @@ body.fp-open #chatPanel{right:260px;}
 .map-empty-txt{font-family:var(--mono);font-size:12px;color:var(--muted);
   text-align:center;line-height:1.6;white-space:pre-line;}
 .map-empty-btn{
-  pointer-events:all;
+  pointer-events:all;  /* 버튼만 클릭 가능 */
   margin-top:4px;padding:8px 20px;
   font-family:var(--mono);font-size:11px;font-weight:700;
   background:var(--accent);color:#000;border:none;border-radius:12px;
@@ -2703,6 +2697,7 @@ setInterval(() => {
 window.buildMarkers      = buildMarkers;
 window._checkEmptyState  = _checkEmptyState;
 window.onLoginSuccess    = onLoginSuccess;
+window.FriendStore       = FriendStore;
 
 // ═══════════════════════════════════════════════════════════════
 //  BOTTOM SHEET
