@@ -553,6 +553,49 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .map-hint.on{opacity:1;}
 
 /* create modal — location picked indicator */
+/* ─── 장소 검색 ───────────────────────────── */
+.loc-search-wrap{position:relative;margin-bottom:6px;}
+.loc-search-row{display:flex;gap:6px;}
+.loc-search-input{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:8px 12px;
+  font-family:var(--mono);font-size:11px;color:var(--text);outline:none;
+}
+.loc-search-input:focus{border-color:var(--a2);}
+.loc-search-btn{
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  padding:8px 12px;border-radius:10px;
+  background:var(--a2);color:#000;border:none;cursor:pointer;
+  white-space:nowrap;flex-shrink:0;
+}
+.loc-search-btn:hover{opacity:.88;}
+.loc-results{
+  position:absolute;top:100%;left:0;right:0;z-index:1200;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;margin-top:4px;
+  max-height:200px;overflow-y:auto;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);
+  display:none;
+}
+.loc-results.on{display:block;}
+.loc-result-item{
+  display:flex;align-items:flex-start;gap:8px;
+  padding:10px 12px;cursor:pointer;transition:background .15s;
+  border-bottom:1px solid var(--border);
+}
+.loc-result-item:last-child{border-bottom:none;}
+.loc-result-item:hover{background:var(--s2);}
+.loc-result-icon{font-size:14px;flex-shrink:0;margin-top:1px;}
+.loc-result-info{flex:1;min-width:0;}
+.loc-result-name{
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.loc-result-addr{
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+  margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
 .loc-picked{
   display:flex;align-items:center;gap:8px;
   background:rgba(0,245,160,.06);border:1px solid rgba(0,245,160,.2);
@@ -1957,6 +2000,17 @@ body.fp-open #chatPanel{right:260px;}
     </div>
     <div class="field">
       <div class="field-lbl" data-i18n="f_loc" style="font-size:10px;color:#ffffff;">📍 모임 시작 장소</div>
+      <!-- 장소 검색 -->
+      <div class="loc-search-wrap">
+        <div class="loc-search-row">
+          <input class="loc-search-input" id="locSearchInput"
+                 placeholder="장소 또는 주소 검색..."
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();locSearch();}">
+          <button class="loc-search-btn" onclick="locSearch()">🔍 검색</button>
+        </div>
+        <div class="loc-results" id="locResults"></div>
+      </div>
+      <!-- 지도 직접 클릭 -->
       <div class="loc-picked empty" id="locDisplay" onclick="startPickLocation()" style="cursor:pointer;">
         <span id="locIcon">📍</span>
         <span id="locText">지도를 클릭하여 장소를 선택하세요</span>
@@ -3156,6 +3210,101 @@ Object.defineProperty(window, 'MEETINGS', {
 // ─── Map click → location pick flow ─────────────────────────
 let pickingLocation = false, pendingLatLng = null;
 
+// ── 장소 검색 (Nominatim / OpenStreetMap) ────────────────────
+let _locSearchTimer = null;
+
+async function locSearch() {
+  const q = document.getElementById('locSearchInput').value.trim();
+  if (!q) return;
+
+  const resEl = document.getElementById('locResults');
+  resEl.innerHTML = `<div class="loc-result-item"><span class="loc-result-icon">⏳</span><div class="loc-result-info"><div class="loc-result-name">${lang==='ko'?'검색 중...':'Searching...'}</div></div></div>`;
+  resEl.classList.add('on');
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=${lang==='ko'?'ko':'en'}&countrycodes=kr`;
+    const res  = await fetch(url, { headers: { 'Accept-Language': lang==='ko'?'ko':'en' } });
+    const data = await res.json();
+
+    if (!data.length) {
+      resEl.innerHTML = `<div class="loc-result-item"><span class="loc-result-icon">🔍</span><div class="loc-result-info"><div class="loc-result-name">${lang==='ko'?'검색 결과가 없습니다':'No results found'}</div></div></div>`;
+      return;
+    }
+
+    resEl.innerHTML = data.map((item, i) => {
+      // 표시명 정리: 앞부분 지명만 추출
+      const parts    = item.display_name.split(', ');
+      const name     = parts[0];
+      const addr     = parts.slice(1, 4).join(', ');
+      const icon     = getLocIcon(item.type, item.class);
+      return `<div class="loc-result-item" onclick="selectLocResult(${item.lat}, ${item.lon}, '${name.replace(/'/g,"\\'")}', '${addr.replace(/'/g,"\\'")}')">
+        <span class="loc-result-icon">${icon}</span>
+        <div class="loc-result-info">
+          <div class="loc-result-name">${name}</div>
+          <div class="loc-result-addr">${addr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('[locSearch]', e);
+    resEl.innerHTML = `<div class="loc-result-item"><span class="loc-result-icon">⚠️</span><div class="loc-result-info"><div class="loc-result-name">${lang==='ko'?'검색 오류':'Search error'}</div></div></div>`;
+  }
+}
+
+// 장소 타입별 아이콘
+function getLocIcon(type, cls) {
+  if (cls === 'amenity')  return '🏢';
+  if (cls === 'leisure')  return '🌳';
+  if (cls === 'highway')  return '🛣️';
+  if (cls === 'natural')  return '🏔️';
+  if (cls === 'place')    return '📍';
+  if (type === 'park')    return '🌳';
+  if (type === 'river' || type === 'stream') return '🌊';
+  return '📍';
+}
+
+// 검색 결과 선택 → 지도 이동 + 위치 지정
+function selectLocResult(lat, lon, name, addr) {
+  const latlng = { lat: parseFloat(lat), lng: parseFloat(lon) };
+
+  // 지도 이동
+  MAP.setView([latlng.lat, latlng.lng], 15);
+
+  // 위치 지정
+  pendingLatLng = latlng;
+  pickingLocation = false;
+  MAP.getContainer().style.cursor = '';
+  document.getElementById('mapHint').classList.remove('on');
+
+  // locDisplay 업데이트
+  const locDisplay = document.getElementById('locDisplay');
+  const locText    = document.getElementById('locText');
+  const locIcon    = document.getElementById('locIcon');
+  locDisplay.className = 'loc-picked';
+  locIcon.textContent  = '✅';
+  locText.textContent  = name + (addr ? ` (${addr})` : '');
+
+  // 검색창/결과 닫기
+  document.getElementById('locResults').classList.remove('on');
+  document.getElementById('locSearchInput').value = name;
+
+  // 임시 마커 표시
+  if (window._tmpLocMarker) MAP.removeLayer(window._tmpLocMarker);
+  window._tmpLocMarker = L.circleMarker([latlng.lat, latlng.lng], {
+    radius:9, color:var_accent(), fillColor:var_accent(),
+    fillOpacity:.7, weight:2,
+  }).addTo(MAP).bindPopup(name).openPopup();
+}
+
+function var_accent() { return '#00f5a0'; }
+
+// 검색창 외부 클릭 시 결과 닫기
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.loc-search-wrap')) {
+    document.getElementById('locResults')?.classList.remove('on');
+  }
+});
+
 function startPickLocation() {
   // Close create modal temporarily, show hint
   document.getElementById('createOv').classList.remove('on');
@@ -3214,6 +3363,10 @@ function closeCreate() {
   MAP.getContainer().style.cursor = '';
   document.getElementById('mapHint').classList.remove('on');
   _resetAttach();
+  // 임시 마커 + 검색창 초기화
+  if (window._tmpLocMarker) { MAP.removeLayer(window._tmpLocMarker); window._tmpLocMarker = null; }
+  document.getElementById('locSearchInput').value = '';
+  document.getElementById('locResults').classList.remove('on');
   popPanel();
 }
 function adjMax(d) { maxParticipants = Math.max(2, Math.min(100, maxParticipants + d)); document.getElementById('maxVal').textContent = maxParticipants; }
