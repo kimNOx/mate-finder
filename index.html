@@ -297,22 +297,24 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .bs-body{padding:18px 22px 0;}
 
 /* ─── 출발시간 커스텀 드롭다운 ─────────── */
-.dept-mobile{ display:none; }   /* 모바일만 표시 */
-.dept-custom{
-  display:flex;align-items:center;gap:6px;flex-wrap:nowrap;
-}
+.dept-mobile{ display:none; }
+.dept-custom{ display:flex;flex-direction:column;gap:0; }
+.dept-row{ display:flex;align-items:center;gap:6px;width:100%; }
 .dept-sel{
   background:var(--s2);border:1px solid var(--border);
-  border-radius:9px;padding:8px 10px;
+  border-radius:9px;padding:8px 28px 8px 10px;
   font-family:var(--mono);font-size:12px;color:var(--text);
-  outline:none;cursor:pointer;appearance:none;
-  -webkit-appearance:none;
+  outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a5568'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 8px center;
+  box-sizing:border-box;
 }
 .dept-sel:focus{ border-color:var(--a2); }
-.dept-sel-date{ flex:1;padding-right:24px; }
-.dept-sel-sm{ flex-shrink:0;padding-right:24px;min-width:70px; }
+/* 1행: 월/일 각 50% */
+.dept-sel-half{ flex:1; }
+/* 2행: 오전/오후 1/5, 시간 2/5, 분 2/5 */
+.dept-sel-1of5{ flex:1; }
+.dept-sel-2of5{ flex:2; }
 
 @media (max-width:768px){
   .dept-mobile{ display:block; }
@@ -2059,14 +2061,20 @@ body.fp-open #chatPanel{right:260px;}
       <input id="fDept" type="datetime-local" class="dept-mobile">
       <!-- 데스크톱: 커스텀 드롭다운 -->
       <div class="dept-custom">
-        <select id="deptDate" class="dept-sel dept-sel-date" onchange="syncDeptTime()"></select>
-        <select id="deptAmpm" class="dept-sel dept-sel-sm" onchange="syncDeptTime()">
-          <option value="AM">오전</option>
-          <option value="PM">오후</option>
-        </select>
-        <select id="deptHour" class="dept-sel dept-sel-sm" onchange="syncDeptTime()"></select>
-        <span style="color:var(--muted);font-family:var(--mono);font-size:13px;">:</span>
-        <select id="deptMin" class="dept-sel dept-sel-sm" onchange="syncDeptTime()"></select>
+        <!-- 1행: 월 + 일 -->
+        <div class="dept-row">
+          <select id="deptMonth" class="dept-sel dept-sel-half" onchange="syncDeptTime()"></select>
+          <select id="deptDay"   class="dept-sel dept-sel-half" onchange="syncDeptTime()"></select>
+        </div>
+        <!-- 2행: 오전/오후 + 시간 + 분 -->
+        <div class="dept-row" style="margin-top:6px">
+          <select id="deptAmpm" class="dept-sel dept-sel-1of5" onchange="syncDeptTime()">
+            <option value="AM">오전</option>
+            <option value="PM">오후</option>
+          </select>
+          <select id="deptHour" class="dept-sel dept-sel-2of5" onchange="syncDeptTime()"></select>
+          <select id="deptMin"  class="dept-sel dept-sel-2of5" onchange="syncDeptTime()"></select>
+        </div>
       </div>
     </div>
     <div class="field">
@@ -4870,23 +4878,23 @@ function updateHudUnit() {
 // ── 출발시간 커스텀 드롭다운 초기화 ─────────────────────────
 function initDeptDropdowns() {
   const now   = new Date();
-  const today = new Date(now);
+  const monthEl = document.getElementById('deptMonth');
+  const dayEl   = document.getElementById('deptDay');
+  if (!monthEl || !dayEl) return;
 
-  // 날짜 옵션: 오늘~7일 후
-  const dateEl = document.getElementById('deptDate');
-  if (!dateEl) return;
-  dateEl.innerHTML = '';
-  const days = ['일','월','화','수','목','금','토'];
-  for (let i = 0; i <= 7; i++) {
-    const d   = new Date(today);
-    d.setDate(today.getDate() + i);
-    const mm  = String(d.getMonth()+1).padStart(2,'0');
-    const dd  = String(d.getDate()).padStart(2,'0');
-    const day = days[d.getDay()];
-    const val = d.toISOString().slice(0,10);
-    const lbl = i === 0 ? `오늘 (${mm}/${dd} ${day})` : `${mm}/${dd} (${day})`;
-    dateEl.innerHTML += `<option value="${val}">${lbl}</option>`;
+  // 월 옵션: 이번 달 ~ 3개월 후
+  monthEl.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const m = d.getMonth() + 1;
+    const y = d.getFullYear();
+    monthEl.innerHTML += `<option value="${y}-${String(m).padStart(2,'0')}">${m}월</option>`;
   }
+
+  // 월 변경 시 일 옵션 갱신
+  monthEl.onchange = () => { updateDayOptions(); syncDeptTime(); };
+
+  updateDayOptions();
 
   // 시간 옵션: 1~12
   const hourEl = document.getElementById('deptHour');
@@ -4902,11 +4910,21 @@ function initDeptDropdowns() {
     minEl.innerHTML += `<option value="${m}">${String(m).padStart(2,'0')}분</option>`;
   }
 
-  // 기본값: 현재 시간 + 1시간 반올림
+  // 기본값: 현재 시간 + 1시간, 10분 반올림
   const def = new Date(now.getTime() + 60*60*1000);
   def.setMinutes(Math.ceil(def.getMinutes()/10)*10, 0, 0);
   if (def.getMinutes() === 60) { def.setHours(def.getHours()+1); def.setMinutes(0); }
 
+  // 월 기본값
+  const defM = `${def.getFullYear()}-${String(def.getMonth()+1).padStart(2,'0')}`;
+  if (monthEl.querySelector(`option[value="${defM}"]`)) monthEl.value = defM;
+  updateDayOptions();
+
+  // 일 기본값
+  const defDay = def.getDate();
+  if (dayEl.querySelector(`option[value="${defDay}"]`)) dayEl.value = defDay;
+
+  // 오전/오후, 시, 분 기본값
   const h24  = def.getHours();
   const ampm = h24 < 12 ? 'AM' : 'PM';
   const h12  = h24 % 12 || 12;
@@ -4919,18 +4937,42 @@ function initDeptDropdowns() {
   syncDeptTime();
 }
 
-// 드롭다운 값 → fDept hidden input 동기화
+// 선택된 월에 맞는 일 옵션 갱신
+function updateDayOptions() {
+  const monthEl = document.getElementById('deptMonth');
+  const dayEl   = document.getElementById('deptDay');
+  if (!monthEl || !dayEl) return;
+
+  const [y, m]   = monthEl.value.split('-').map(Number);
+  const now      = new Date();
+  const daysInM  = new Date(y, m, 0).getDate();
+  const prevDay  = parseInt(dayEl.value) || now.getDate();
+  const startDay = (y === now.getFullYear() && m === now.getMonth()+1) ? now.getDate() : 1;
+
+  dayEl.innerHTML = '';
+  for (let d = startDay; d <= daysInM; d++) {
+    dayEl.innerHTML += `<option value="${d}">${d}일</option>`;
+  }
+  // 이전 선택일 유지 (가능하면)
+  if (dayEl.querySelector(`option[value="${prevDay}"]`)) dayEl.value = prevDay;
+}
+
+// 드롭다운 → fDept input 동기화
 function syncDeptTime() {
-  const dateVal = document.getElementById('deptDate')?.value;
-  const ampm    = document.getElementById('deptAmpm')?.value;
-  const h12     = parseInt(document.getElementById('deptHour')?.value || '12');
-  const min     = parseInt(document.getElementById('deptMin')?.value  || '0');
-  if (!dateVal) return;
+  const monthEl = document.getElementById('deptMonth');
+  const dayEl   = document.getElementById('deptDay');
+  if (!monthEl || !dayEl) return;
+
+  const monthVal = monthEl.value;  // "2026-06"
+  const day      = String(parseInt(dayEl.value)).padStart(2,'0');
+  const ampm     = document.getElementById('deptAmpm').value;
+  const h12      = parseInt(document.getElementById('deptHour').value || '12');
+  const min      = parseInt(document.getElementById('deptMin').value  || '0');
 
   let h24 = h12 % 12;
   if (ampm === 'PM') h24 += 12;
 
-  const timeStr = `${dateVal}T${String(h24).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  const timeStr = `${monthVal}-${day}T${String(h24).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
   document.getElementById('fDept').value = timeStr;
 }
 // 초/km → "M'SS\"/km" 표시
