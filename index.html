@@ -185,6 +185,7 @@ window._startMeetingsListener = function() {
           score: data.hostScore ?? 0,
           cat:   data.hostCat   ?? 'run',
         },
+        gpxCoords: data.gpxCoords ?? [],  // GPX 좌표 배열
       };
     });
     // 마커 바로 렌더 (친구 캐시는 이미 로그인 시 로드됨)
@@ -256,9 +257,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
 /* ─── FAB ─────────────────────────────────── */
 .fab{position:fixed;right:20px;bottom:100px;z-index:510;
-  width:52px;height:52px;border-radius:16px;border:none;cursor:pointer;
+  width:72px;height:72px;border-radius:18px;border:none;cursor:pointer;
   background:linear-gradient(135deg,var(--accent),var(--a2));
-  display:flex;align-items:center;justify-content:center;font-size:22px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
   box-shadow:0 4px 20px rgba(0,245,160,.4);transition:transform .15s, right .32s cubic-bezier(.34,1.05,.64,1);}
 .fab:hover{transform:scale(1.08);}
 .fab:active{transform:scale(.95);}
@@ -1851,13 +1852,15 @@ body.fp-open #chatPanel{right:260px;}
 </div>
 
 <!-- FAB create -->
-<button class="fab" onclick="openCreate()" title="모임 만들기">＋</button>
+<button class="fab" onclick="openCreate()" title="모임 만들기">
+  <span style="font-size:20px;">＋</span>
+  <span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:-.3px;">새 모임</span>
+</button>
 
 <!-- ── 주변 모임 없음 빈 상태 ── -->
 <div class="map-empty" id="mapEmpty">
   <div class="map-empty-icon">🔍</div>
-  <div class="map-empty-txt" id="mapEmptyTxt">현재 주변에 모임이 없어요\n직접 만들어보세요!</div>
-  <button class="map-empty-btn" onclick="openCreate()">+ 모임 만들기</button>
+  <div class="map-empty-txt" id="mapEmptyTxt">현재 주변에 모임이 없어요</div>
 </div>
 
 <!-- ── ENGINE SCORE 설명 모달 ── -->
@@ -2701,26 +2704,90 @@ let leafletMarkers = {};
 let currentMeeting = null;
 let globalResult   = null;
 
+// ── GPX 관련 전역 변수 ──────────────────────────────────────
+let gpxPolylines      = {};   // { meetingId: L.polyline }
+let currentSelectedId = null; // 1차 클릭으로 선택된 모임 ID
+
+// ── GPX XML → 좌표 배열 파싱 ────────────────────────────────
+function parseGpx(xmlStr) {
+  try {
+    const parser = new DOMParser();
+    const xml    = parser.parseFromString(xmlStr, 'text/xml');
+    const pts    = xml.querySelectorAll('trkpt, rtept, wpt');
+    const coords = [];
+    pts.forEach(pt => {
+      const lat = parseFloat(pt.getAttribute('lat'));
+      const lon = parseFloat(pt.getAttribute('lon'));
+      if (isFinite(lat) && isFinite(lon)) coords.push([lat, lon]);
+    });
+    return coords;
+  } catch(e) { return []; }
+}
+
+// ── 마커/코스 클릭 분기 로직 ────────────────────────────────
+function handleMarkerClick(m) {
+  const hasGpx = !!(m.gpxCoords?.length);
+
+  if (!hasGpx) {
+    // Case A: GPX 없음 → 바로 모달
+    currentSelectedId = null;
+    openBS(m);
+    return;
+  }
+
+  if (currentSelectedId === m.id) {
+    // Case B 2차 클릭: 이미 선택된 모임 → 모달 열기
+    openBS(m);
+  } else {
+    // Case B 1차 클릭: 코스 강조
+    _resetAllPolylines();
+    currentSelectedId = m.id;
+    const pl = gpxPolylines[m.id];
+    if (pl) {
+      pl.setStyle({ color:'#00f5a0', weight:6, opacity:1 });
+      pl.bringToFront();
+    }
+  }
+}
+
+// ── 모든 코스 기본 상태로 리셋 ──────────────────────────────
+function _resetAllPolylines() {
+  Object.values(gpxPolylines).forEach(pl => {
+    pl.setStyle({ color:'#ffffff', weight:3, opacity:0.4 });
+  });
+  currentSelectedId = null;
+}
+
 function buildMarkers(){
+  // 기존 마커 제거
   Object.values(leafletMarkers).forEach(m => MAP.removeLayer(m));
   leafletMarkers = {};
 
-  // window.MEETINGS 참조 (Firestore 실시간 데이터)
+  // 기존 GPX 폴리라인 제거
+  Object.values(gpxPolylines).forEach(pl => MAP.removeLayer(pl));
+  gpxPolylines = {};
+
   const meetings = window.MEETINGS || [];
 
   meetings.forEach(m => {
     if(isExpired(m)) return;
-
-    // ── 반경 필터: 내 위치 기준 GeoFilter.radiusKm 초과 시 제외 ──
     if(!GeoFilter.isInRange(m)) return;
 
-    const status = meetingStatus(m);
-
-    // ── 종목 필터 투명도: 선택된 종목과 다르면 0.30으로 흐리게 ──
+    const status     = meetingStatus(m);
     const catOpacity = CatFilter.opacity(m.cat);
-
-    // ── 서로 친구가 만든 모임 판별 ────────────────────────────────
     const isMutualHost = !!(m.host.id && FriendStore.isMutualSync(m.host.id));
+
+    // ── GPX 폴리라인 그리기 ──────────────────────────────────
+    if (m.gpxCoords?.length) {
+      const isSelected = currentSelectedId === m.id;
+      const pl = L.polyline(m.gpxCoords, {
+        color:   isSelected ? '#00f5a0' : '#ffffff',
+        weight:  isSelected ? 6 : 3,
+        opacity: isSelected ? 1 : 0.4,
+      }).addTo(MAP);
+      pl.on('click', () => handleMarkerClick(m));
+      gpxPolylines[m.id] = pl;
+    }
 
     let icon;
     if(isMutualHost && status !== 'running'){
@@ -2732,7 +2799,6 @@ function buildMarkers(){
       icon = makePinIcon(color, code === 'GRAY', status === 'running', catOpacity);
     }
 
-    // 흐린 마커는 클릭 우선순위를 낮춤 (zOffset 감소)
     const zOffset = isMutualHost
       ? (catOpacity < 0.99 ? 500  : 2000)
       : (status === 'future'
@@ -2741,12 +2807,11 @@ function buildMarkers(){
 
     const marker = L.marker(m.coord, { icon, zIndexOffset: zOffset, opacity: 1 })
       .addTo(MAP)
-      .on('click', () => openBS(m));
+      .on('click', () => handleMarkerClick(m));
 
     leafletMarkers[m.id] = marker;
   });
 
-  // 7번: 보이는 마커 없으면 빈 상태 표시
   _checkEmptyState();
 }
 
@@ -3314,7 +3379,11 @@ function startPickLocation() {
 }
 
 MAP.on('click', e => {
-  if (!pickingLocation) return;
+  if (!pickingLocation) {
+    // 빈 지도 클릭 시 코스 선택 해제
+    if (currentSelectedId) _resetAllPolylines();
+    return;
+  }
   pendingLatLng = e.latlng;
   pickingLocation = false;
   MAP.getContainer().style.cursor = '';
@@ -3395,6 +3464,16 @@ async function submitCreate() {
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
+  // GPX 파일 파싱 → 좌표 배열 추출
+  let gpxCoords = [];
+  const gpxFile = _attachFiles.find(a => a.file.name.toLowerCase().endsWith('.gpx'));
+  if (gpxFile) {
+    try {
+      const gpxText  = await gpxFile.file.text();
+      gpxCoords      = parseGpx(gpxText);
+    } catch(e) { console.warn('[GPX parse]', e); }
+  }
+
   try {
     await window._firestoreSubmitCreate({
       title, cat,
@@ -3409,6 +3488,7 @@ async function submitCreate() {
       hostCat:         globalResult?.cat ?? cat,
       participantUids: [],
       endedUids:       [],
+      gpxCoords:       gpxCoords,  // GPX 좌표 배열 (없으면 [])
     });
     // 성공: 모달 닫기 + 버튼 복원
     if (btn) { btn.disabled = false; btn.textContent = lang==='ko'?'모임 개설':'Create'; }
