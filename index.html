@@ -2823,7 +2823,7 @@ function parseGpx(xmlStr) {
   try {
     const parser = new DOMParser();
     const xml    = parser.parseFromString(xmlStr, 'text/xml');
-    const pts    = xml.querySelectorAll('trkpt, rtept, wpt');
+    const pts    = xml.querySelectorAll('trkpt, rtept');
     const coords = [];
     pts.forEach(pt => {
       const lat = parseFloat(pt.getAttribute('lat'));
