@@ -2840,7 +2840,7 @@ function handleMarkerClick(m) {
 
   if (!hasGpx) {
     // Case A: GPX 없음 → 바로 모달
-    currentSelectedId = null;
+    _resetAllPolylines();
     openBS(m);
     return;
   }
