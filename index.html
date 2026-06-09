@@ -3598,10 +3598,22 @@ async function submitCreate() {
   const dist  = parseFloat(document.getElementById('fDist').value);
   const dept  = new Date(document.getElementById('fDept').value).getTime();
   const route = document.getElementById('fRoute').value.trim() || '—';
-  if (!title || !dist || !dept || !pendingLatLng) {
-    showToast('A', lang==='ko'?'모든 필드를 입력하고 지도에서 장소를 선택해주세요':'Fill all fields and pick a location');
+ if (!title) {
+    showToast('A', lang==='ko'?'모임 이름을 입력해주세요':'Please enter a meeting title');
     return;
-  }
+ }
+ if (!pendingLatLng) {
+    showToast('A', lang==='ko'?'지도에서 장소를 선택해주세요':'Please pick a location on the map');
+    return;
+ }
+ if (!dist || isNaN(dist) || dist <= 0) {
+    alert(lang==='ko'?'거리를 입력해 주세요':'Please enter a distance');
+    return;
+ }
+ if (!dept) {
+    showToast('A', lang==='ko'?'출발 시간을 설정해주세요':'Please set a departure time');
+    return;
+ }
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
