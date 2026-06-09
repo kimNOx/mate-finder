@@ -126,7 +126,24 @@ window._firestoreSubmitCreate = async function(data) {
   });
 };
 
-// ── Auth 상태 감지 ───────────────────────────────────────────
+// ── 만료 모임 자동 삭제 (로그인 시 1회 실행) ────────────────
+window._cleanupExpiredMeetings = async function() {
+  try {
+    const { collection, query, where, getDocs, deleteDoc } = window._fb;
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48시간 전
+    const q = query(
+      collection(fbDb, 'meetings'),
+      where('departAt', '<', cutoff)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return;
+    const deletes = snap.docs.map(d => deleteDoc(d.ref));
+    await Promise.all(deletes);
+    console.log(`[cleanup] 만료 모임 ${snap.size}개 삭제됨`);
+  } catch(e) {
+    console.warn('[cleanup] 삭제 오류:', e);
+  }
+};
 onAuthStateChanged(fbAuth, async (user) => {
   if (!user) return;
   try {
@@ -2819,10 +2836,13 @@ let gpxPolylines      = {};   // { meetingId: L.polyline }
 let currentSelectedId = null; // 1차 클릭으로 선택된 모임 ID
 
 // ── GPX XML → 좌표 배열 파싱 ────────────────────────────────
+// trkpt(트랙포인트), rtept(루트포인트)만 사용
+// wpt(웨이포인트)는 제외 — 경로 밖 지점이라 직선 생김
 function parseGpx(xmlStr) {
   try {
     const parser = new DOMParser();
     const xml    = parser.parseFromString(xmlStr, 'text/xml');
+    // wpt 제외! trkpt + rtept 만 사용
     const pts    = xml.querySelectorAll('trkpt, rtept');
     const coords = [];
     pts.forEach(pt => {
@@ -2839,7 +2859,7 @@ function handleMarkerClick(m) {
   const hasGpx = !!(m.gpxCoords?.length);
 
   if (!hasGpx) {
-    // Case A: GPX 없음 → 바로 모달
+    // Case A: GPX 없음 → 기존 코스 리셋 후 바로 모달
     _resetAllPolylines();
     openBS(m);
     return;
@@ -3382,6 +3402,11 @@ function onLoginSuccess(user) {
   // GPS
   GeoFilter.init();
 
+  // 만료 모임 자동 청소 (48시간 이상 지난 것 삭제)
+  if (typeof window._cleanupExpiredMeetings === 'function') {
+    window._cleanupExpiredMeetings();
+  }
+
   // 친구 캐시 갱신 완료 후 → 모임 리스너 시작 (무지개 핀 정확하게 표시)
   FriendStore.refresh().then(() => {
     renderFriendsList();
@@ -3598,22 +3623,22 @@ async function submitCreate() {
   const dist  = parseFloat(document.getElementById('fDist').value);
   const dept  = new Date(document.getElementById('fDept').value).getTime();
   const route = document.getElementById('fRoute').value.trim() || '—';
- if (!title) {
+  if (!title) {
     showToast('A', lang==='ko'?'모임 이름을 입력해주세요':'Please enter a meeting title');
     return;
- }
- if (!pendingLatLng) {
+  }
+  if (!pendingLatLng) {
     showToast('A', lang==='ko'?'지도에서 장소를 선택해주세요':'Please pick a location on the map');
     return;
- }
- if (!dist || isNaN(dist) || dist <= 0) {
+  }
+  if (!dist || isNaN(dist) || dist <= 0) {
     alert(lang==='ko'?'거리를 입력해 주세요':'Please enter a distance');
     return;
- }
- if (!dept) {
+  }
+  if (!dept) {
     showToast('A', lang==='ko'?'출발 시간을 설정해주세요':'Please set a departure time');
     return;
- }
+  }
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
