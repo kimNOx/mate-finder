@@ -296,7 +296,28 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   margin:13px auto 0;cursor:pointer;}
 .bs-body{padding:18px 22px 0;}
 
-/* departure banner */
+/* ─── 출발시간 커스텀 드롭다운 ─────────── */
+.dept-mobile{ display:none; }   /* 모바일만 표시 */
+.dept-custom{
+  display:flex;align-items:center;gap:6px;flex-wrap:nowrap;
+}
+.dept-sel{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:9px;padding:8px 10px;
+  font-family:var(--mono);font-size:12px;color:var(--text);
+  outline:none;cursor:pointer;appearance:none;
+  -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a5568'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;
+}
+.dept-sel:focus{ border-color:var(--a2); }
+.dept-sel-date{ flex:1;padding-right:24px; }
+.dept-sel-sm{ flex-shrink:0;padding-right:24px;min-width:70px; }
+
+@media (max-width:768px){
+  .dept-mobile{ display:block; }
+  .dept-custom{ display:none; }
+}
 .dep-banner{display:flex;align-items:center;gap:10px;
   background:var(--s2);border:1px solid var(--border);border-radius:10px;
   padding:10px 14px;margin-bottom:14px;font-family:var(--mono);font-size:11px;}
@@ -2034,7 +2055,19 @@ body.fp-open #chatPanel{right:260px;}
     </div>
     <div class="field">
       <div class="field-lbl" data-i18n="f_dept">출발 시간</div>
-      <input id="fDept" type="datetime-local">
+      <!-- 모바일: 기본 datetime-local -->
+      <input id="fDept" type="datetime-local" class="dept-mobile">
+      <!-- 데스크톱: 커스텀 드롭다운 -->
+      <div class="dept-custom">
+        <select id="deptDate" class="dept-sel dept-sel-date" onchange="syncDeptTime()"></select>
+        <select id="deptAmpm" class="dept-sel dept-sel-sm" onchange="syncDeptTime()">
+          <option value="AM">오전</option>
+          <option value="PM">오후</option>
+        </select>
+        <select id="deptHour" class="dept-sel dept-sel-sm" onchange="syncDeptTime()"></select>
+        <span style="color:var(--muted);font-family:var(--mono);font-size:13px;">:</span>
+        <select id="deptMin" class="dept-sel dept-sel-sm" onchange="syncDeptTime()"></select>
+      </div>
     </div>
     <div class="field">
       <div class="field-lbl" data-i18n="f_max">최대 참여 인원</div>
@@ -2718,7 +2751,7 @@ function parseGpx(xmlStr) {
     pts.forEach(pt => {
       const lat = parseFloat(pt.getAttribute('lat'));
       const lon = parseFloat(pt.getAttribute('lon'));
-      if (isFinite(lat) && isFinite(lon)) coords.push([lat, lon]);
+      if (isFinite(lat) && isFinite(lon)) coords.push({ lat, lng: lon });
     });
     return coords;
   } catch(e) { return []; }
@@ -2780,7 +2813,9 @@ function buildMarkers(){
     // ── GPX 폴리라인 그리기 ──────────────────────────────────
     if (m.gpxCoords?.length) {
       const isSelected = currentSelectedId === m.id;
-      const pl = L.polyline(m.gpxCoords, {
+      // Firestore는 {lat,lng} 객체, Leaflet은 [lat,lng] 배열 필요
+      const latlngs = m.gpxCoords.map(c => [c.lat, c.lng]);
+      const pl = L.polyline(latlngs, {
         color:   isSelected ? '#00f5a0' : '#ffffff',
         weight:  isSelected ? 6 : 3,
         opacity: isSelected ? 1 : 0.4,
@@ -3423,6 +3458,7 @@ function openCreate() {
   fType.value = activeCat;
   updateTypeHint();
   _resetAttach();
+  initDeptDropdowns();
   document.getElementById('createOv').classList.add('on');
   pushPanel('create');
 }
@@ -3464,13 +3500,20 @@ async function submitCreate() {
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
-  // GPX 파일 파싱 → 좌표 배열 추출
+  // GPX 파일 파싱 → 좌표 배열 추출 (최대 500포인트로 간략화)
   let gpxCoords = [];
   const gpxFile = _attachFiles.find(a => a.file.name.toLowerCase().endsWith('.gpx'));
   if (gpxFile) {
     try {
-      const gpxText  = await gpxFile.file.text();
-      gpxCoords      = parseGpx(gpxText);
+      const gpxText = await gpxFile.file.text();
+      const raw     = parseGpx(gpxText);
+      // 포인트가 많으면 균등 샘플링
+      if (raw.length > 500) {
+        const step = Math.ceil(raw.length / 500);
+        gpxCoords  = raw.filter((_, i) => i % step === 0);
+      } else {
+        gpxCoords  = raw;
+      }
     } catch(e) { console.warn('[GPX parse]', e); }
   }
 
@@ -4824,7 +4867,72 @@ function updateHudUnit() {
   else if (displayCat === 'run')  el.textContent = 'min/km';
   else                            el.textContent = '';
 }
-// ── 페이스 변환 헬퍼 ─────────────────────────────────────────
+// ── 출발시간 커스텀 드롭다운 초기화 ─────────────────────────
+function initDeptDropdowns() {
+  const now   = new Date();
+  const today = new Date(now);
+
+  // 날짜 옵션: 오늘~7일 후
+  const dateEl = document.getElementById('deptDate');
+  if (!dateEl) return;
+  dateEl.innerHTML = '';
+  const days = ['일','월','화','수','목','금','토'];
+  for (let i = 0; i <= 7; i++) {
+    const d   = new Date(today);
+    d.setDate(today.getDate() + i);
+    const mm  = String(d.getMonth()+1).padStart(2,'0');
+    const dd  = String(d.getDate()).padStart(2,'0');
+    const day = days[d.getDay()];
+    const val = d.toISOString().slice(0,10);
+    const lbl = i === 0 ? `오늘 (${mm}/${dd} ${day})` : `${mm}/${dd} (${day})`;
+    dateEl.innerHTML += `<option value="${val}">${lbl}</option>`;
+  }
+
+  // 시간 옵션: 1~12
+  const hourEl = document.getElementById('deptHour');
+  hourEl.innerHTML = '';
+  for (let h = 1; h <= 12; h++) {
+    hourEl.innerHTML += `<option value="${h}">${h}시</option>`;
+  }
+
+  // 분 옵션: 10분 단위
+  const minEl = document.getElementById('deptMin');
+  minEl.innerHTML = '';
+  for (let m = 0; m < 60; m += 10) {
+    minEl.innerHTML += `<option value="${m}">${String(m).padStart(2,'0')}분</option>`;
+  }
+
+  // 기본값: 현재 시간 + 1시간 반올림
+  const def = new Date(now.getTime() + 60*60*1000);
+  def.setMinutes(Math.ceil(def.getMinutes()/10)*10, 0, 0);
+  if (def.getMinutes() === 60) { def.setHours(def.getHours()+1); def.setMinutes(0); }
+
+  const h24  = def.getHours();
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  const h12  = h24 % 12 || 12;
+  const min  = Math.floor(def.getMinutes()/10)*10;
+
+  document.getElementById('deptAmpm').value = ampm;
+  document.getElementById('deptHour').value = h12;
+  document.getElementById('deptMin').value  = min;
+
+  syncDeptTime();
+}
+
+// 드롭다운 값 → fDept hidden input 동기화
+function syncDeptTime() {
+  const dateVal = document.getElementById('deptDate')?.value;
+  const ampm    = document.getElementById('deptAmpm')?.value;
+  const h12     = parseInt(document.getElementById('deptHour')?.value || '12');
+  const min     = parseInt(document.getElementById('deptMin')?.value  || '0');
+  if (!dateVal) return;
+
+  let h24 = h12 % 12;
+  if (ampm === 'PM') h24 += 12;
+
+  const timeStr = `${dateVal}T${String(h24).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  document.getElementById('fDept').value = timeStr;
+}
 // 초/km → "M'SS\"/km" 표시
 function secToPaceStr(sec) {
   if (!sec || sec <= 0) return '—';
