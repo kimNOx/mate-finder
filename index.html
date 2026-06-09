@@ -336,9 +336,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .av{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);
   background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
 .host-name{font-size:15px;font-weight:700;}
-.sv-badge{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:8px;
-  background:rgba(252,82,0,.12);border:1px solid rgba(252,82,0,.25);color:#fc5200;
-  padding:2px 7px;border-radius:8px;margin-top:3px;}
 .host-score{text-align:right;font-family:var(--mono);}
 .host-score-lbl{font-size:8px;color:var(--muted);letter-spacing:1px;}
 .host-score-val{font-size:20px;font-weight:700;color:var(--a2);}
@@ -1916,7 +1913,7 @@ body.fp-open #chatPanel{right:260px;}
       </div>
       <div class="es-row">
         <span class="es-rank">등급</span>
-        <div class="es-desc" id="esRunGradeTable">엘리트 &lt;3'30" / 상급 &lt;4'30" / 중급 &lt;5'30" / 입문 ≥5'30"</div>
+        <div class="es-desc" id="esRunGradeTable">엘리트 &lt;3'30" / 상급 &lt;4'15" / 중급 &lt;5'00" / 초급 &lt;5'45" / 입문 ≥5'45"</div>
       </div>
     </div>
 
@@ -1928,7 +1925,7 @@ body.fp-open #chatPanel{right:260px;}
       </div>
       <div class="es-row">
         <span class="es-rank">등급</span>
-        <div class="es-desc" id="esRideCond">입문 &lt;2.5 / 중급 &lt;3.2 / 상급 &lt;4.2 / 엘리트 ≥4.2 w/kg</div>
+        <div class="es-desc" id="esRideCond">입문 &lt;2.5 / 초급 &lt;3.0 / 중급 &lt;3.5 / 상급 &lt;4.0 / 엘리트 ≥4.0 w/kg</div>
       </div>
     </div>
 
@@ -1968,7 +1965,7 @@ body.fp-open #chatPanel{right:260px;}
         <div class="av" id="bsAv">👤</div>
         <div style="flex:1">
           <div class="host-name" id="bsHostName">—</div>
-          <div class="sv-badge"><span>⚡</span><span>Strava Verified</span></div>
+
         </div>
         <div class="host-score">
           <div class="host-score-lbl" data-i18n="host_score_lbl">HOST SCORE</div>
@@ -2189,11 +2186,7 @@ function classifyTier(ratio) {
 //  라이딩: w/kg 직접 입력
 //  티어 매칭(T1~T7): 내 점수 ÷ 호스트 점수 = ratio
 // ═══════════════════════════════════════════════════════════════
-class EngineScoreError extends Error {
-  constructor(code, detail=''){super(`[ES] ${code}: ${detail}`);this.code=code;}
-}
-
-const ErrCode = { NO_ACTIVITIES:'NO_ACTIVITIES', NO_ELIGIBLE:'NO_ELIGIBLE' };
+// EngineScoreError / ErrCode 제거됨 (Strava 자동계산 삭제)
 
 // ── EngineScore 유틸 (수동입력 전용) ─────────────────────────
 const EngineScore = {
@@ -2435,7 +2428,7 @@ function setLang(l){
 // ═══════════════════════════════════════════════════════════════
 //  MOCK DATA  (activities cover both ride + run)
 // ═══════════════════════════════════════════════════════════════
-// MY_ACTIVITIES 제거됨 (Strava 연동 삭제)
+
 
 // Meetings now managed by Firestore real-time listener (_startMeetingsListener)
 // MEETINGS 배열은 onLoginSuccess 이후 Firestore에서 실시간으로 채워짐
@@ -2635,20 +2628,18 @@ function setCat(val) {
   CatFilter.set(val);
   localStorage.setItem('pm_cat_filter', val);
 
-  // 해당 종목 점수로 globalResult 교체
+  // 해당 종목 수동입력 점수로 globalResult 교체
   const result = ScoreStore.get(val);
   if (result) {
     globalResult = result;
   } else {
-    // 해당 종목 데이터 없음 → Fallback
-    const e = new EngineScoreError('NO_ELIGIBLE', '데이터 없음');
-    e.cat = val === 'all' ? 'run' : val;
-    openFallback('NO_ELIGIBLE', e);
+    // 수동입력값 없음 → Fallback 모달
+    openFallback('edit');
     globalResult = EngineScore.createGray();
   }
 
   onResolved();
-  updateHudUnit();  // onResolved 이후에 단위 덮어쓰기
+  updateHudUnit();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2917,11 +2908,32 @@ async function renderBS(m){
   const avEmoji=['🏃','⚡','🚴','🌄'][MEETINGS.indexOf(m)]??'👤';
   document.getElementById('bsAv').textContent=avEmoji;
   document.getElementById('bsHostName').textContent=m.host.name;
-  const hostUnit = m.cat === 'ride' ? ' w/kg' : ' min/km';
-  document.getElementById('bsHostScore').textContent = m.host.score + hostUnit;
-  document.getElementById('bsHostAlgo').textContent=m.cat==='ride'
-    ?(lang==='ko'?'라이딩 점수':'Ride Score')
-    :(lang==='ko'?'러닝 페이스 점수':'Run Pace Score');
+
+  // 정확한 점수 대신 등급명만 표시
+  function hostGradeLabel(score, cat, lang) {
+    if (!score || score <= 0) return '—';
+    const ko = lang === 'ko';
+    if (cat === 'ride') {
+      if (score >= 4.0) return ko ? '엘리트' : 'Elite';
+      if (score >= 3.5) return ko ? '상급'   : 'Advanced';
+      if (score >= 3.0) return ko ? '중급'   : 'Intermediate';
+      if (score >= 2.5) return ko ? '초급'   : 'Beginner+';
+      return ko ? '입문' : 'Beginner';
+    } else {
+      // 러닝: 1,000,000 ÷ pts = 초/km
+      const paceSec = Math.round(1000000 / score);
+      if (paceSec < 210) return ko ? '엘리트' : 'Elite';       // 3'30" 미만
+      if (paceSec < 255) return ko ? '상급'   : 'Advanced';    // 4'15" 미만
+      if (paceSec < 300) return ko ? '중급'   : 'Intermediate'; // 5'00" 미만
+      if (paceSec < 345) return ko ? '초급'   : 'Beginner+';   // 5'45" 미만
+      return ko ? '입문' : 'Beginner';
+    }
+  }
+  const gradeLabel = hostGradeLabel(m.host.score, m.cat, lang);
+  document.getElementById('bsHostScore').textContent = gradeLabel;
+  document.getElementById('bsHostAlgo').textContent = m.cat==='ride'
+    ?(lang==='ko'?'라이딩 등급':'Ride Grade')
+    :(lang==='ko'?'러닝 등급':'Run Grade');
 
   // Algo badge
   const algoKey = m.cat==='ride'
@@ -3491,7 +3503,7 @@ function updateTypeHint() {
   hint.textContent = cat === 'ride'
     ? (lang === 'ko'
         ? '🚴 라이딩: 파워미터(NP) 우선, 없으면 스트라바 예상파워(WAW) ÷ 체중 = w/kg'
-        : '🚴 Ride: Power meter (NP) preferred; fallback Strava WAW ÷ weight = w/kg')
+        : '🚴 Ride: Enter your FTP-based w/kg directly (e.g. 3.2)')
     : (lang === 'ko'
         ? '🏃 러닝: 1km당 소요시간(sec/km) 역수 비교'
         : '🏃 Run: inverse of pace (sec/km) comparison');
@@ -3566,30 +3578,34 @@ let _fbCat = null;   // 'ride' | 'run'
 // ── 프리셋 정의 ─────────────────────────────────────────────
 const FB_PRESETS = {
   run: [
-    { label: '입문',   sub: '5:00/km 이상', value: '6:30' },
+    { label: '입문',   sub: '5:45/km 이상', value: '6:30' },
+    { label: '초급',   sub: '5:45/km 이하', value: '5:20' },
     { label: '중급',   sub: '5:00/km 이하', value: '4:30' },
-    { label: '상급',   sub: '4:00/km 이하', value: '3:50' },
-    { label: '엘리트', sub: '3:00/km 이하', value: '2:50' },
+    { label: '상급',   sub: '4:15/km 이하', value: '3:55' },
+    { label: '엘리트', sub: '3:30/km 이하', value: '3:10' },
   ],
   ride: [
-    { label: '입문',   sub: '2.5w/kg 이하', value: 2.0 },
-    { label: '중급',   sub: '3.2w/kg 이하', value: 2.8 },
-    { label: '상급',   sub: '4.2w/kg 이하', value: 3.7 },
-    { label: '엘리트', sub: '4.2w/kg 이상', value: 4.5 },
+    { label: '입문',   sub: '2.5 w/kg 미만', value: 2.0 },
+    { label: '초급',   sub: '3.0 w/kg 미만', value: 2.7 },
+    { label: '중급',   sub: '3.5 w/kg 미만', value: 3.2 },
+    { label: '상급',   sub: '4.0 w/kg 미만', value: 3.7 },
+    { label: '엘리트', sub: '4.0 w/kg 이상', value: 4.3 },
   ],
 };
 const FB_PRESETS_EN = {
   run: [
-    { label: 'Beginner',     sub: 'over 5:00/km',  value: '6:30' },
-    { label: 'Intermediate', sub: 'under 5:00/km', value: '4:30' },
-    { label: 'Advanced',     sub: 'under 4:00/km', value: '3:50' },
-    { label: 'Elite',        sub: 'under 3:00/km', value: '2:50' },
+    { label: 'Beginner',      sub: 'over 5:45/km',  value: '6:30' },
+    { label: 'Beginner+',     sub: 'under 5:45/km', value: '5:20' },
+    { label: 'Intermediate',  sub: 'under 5:00/km', value: '4:30' },
+    { label: 'Advanced',      sub: 'under 4:15/km', value: '3:55' },
+    { label: 'Elite',         sub: 'under 3:30/km', value: '3:10' },
   ],
   ride: [
-    { label: 'Beginner',     sub: 'under 2.5w/kg', value: 2.0 },
-    { label: 'Intermediate', sub: 'under 3.2w/kg', value: 2.8 },
-    { label: 'Advanced',     sub: 'under 4.2w/kg', value: 3.7 },
-    { label: 'Elite',        sub: 'above 4.2w/kg', value: 4.5 },
+    { label: 'Beginner',      sub: 'under 2.5 w/kg', value: 2.0 },
+    { label: 'Beginner+',     sub: 'under 3.0 w/kg', value: 2.7 },
+    { label: 'Intermediate',  sub: 'under 3.5 w/kg', value: 3.2 },
+    { label: 'Advanced',      sub: 'under 4.0 w/kg', value: 3.7 },
+    { label: 'Elite',         sub: 'above 4.0 w/kg', value: 4.3 },
   ],
 };
 
@@ -3636,14 +3652,9 @@ function openFallback(reason, err) {
   const detectedCat = err?.cat ?? globalResult?.cat ?? 'run';
 
   // 제목·설명
-  document.getElementById('fbIcon').textContent =
-    reason === 'NO_ACTIVITIES' ? (detectedCat === 'ride' ? '🚴' : '🏃')
-    : reason === 'NO_ELIGIBLE' ? '📏' : '✏️';
-
+  document.getElementById('fbIcon').textContent = reason === 'edit' ? '✏️' : '⚡';
   document.getElementById('fbTitle').textContent =
-    reason === 'NO_ACTIVITIES' ? (lang === 'ko' ? '활동 없음'   : 'No Activities') :
-    reason === 'NO_ELIGIBLE'   ? (lang === 'ko' ? '데이터 부족' : 'Insufficient Data') :
-    (lang === 'ko' ? '내 점수 직접 입력' : 'Enter My Score');
+    lang === 'ko' ? '내 점수 직접 입력' : 'Enter My Score';
 
   document.getElementById('fbDesc').textContent = lang === 'ko'
     ? '종목을 선택하고 나의 현재 실력을 입력하거나\n아래 가이드에서 가장 가까운 단계를 선택하세요.'
@@ -4845,7 +4856,7 @@ function _updateEsModal() {
     ['esRunGradeTable', ko ? "엘리트 &lt;3'30\" / 상급 &lt;4'30\" / 중급 &lt;5'30\" / 입문 ≥5'30\"" : "Elite &lt;3'30\" / Advanced &lt;4'30\" / Intermediate &lt;5'30\" / Beginner ≥5'30\""],
     ['esRideTitle',     ko ? '🚴 라이딩' : '🚴 Cycling'],
     ['esRidePower',     ko ? '나의 <strong>FTP 기반 w/kg</strong>을 직접 입력\n예: 3.2 → 3.2 w/kg' : 'Enter your <strong>FTP-based w/kg</strong>\ne.g. 3.2 → 3.2 w/kg'],
-    ['esRideCond',      ko ? '입문 &lt;2.5 / 중급 &lt;3.2 / 상급 &lt;4.2 / 엘리트 ≥4.2 w/kg' : 'Beginner &lt;2.5 / Inter. &lt;3.2 / Advanced &lt;4.2 / Elite ≥4.2 w/kg'],
+    ['esRideCond',      ko ? '입문 &lt;2.5 / 초급 &lt;3.0 / 중급 &lt;3.5 / 상급 &lt;4.0 / 엘리트 ≥4.0 w/kg' : 'Beginner &lt;2.5 / Beginner+ &lt;3.0 / Inter. &lt;3.5 / Advanced &lt;4.0 / Elite ≥4.0 w/kg'],
     ['esMatchTitle',    ko ? '🎯 매칭 기준 (ratio)' : '🎯 Matching Criteria (ratio)'],
     ['esMatchGold',     ko ? '나의 점수 ÷ 호스트 점수 = <strong>0.95 ~ 1.05</strong>\n가장 이상적인 페이스 매치' : 'My score ÷ Host score = <strong>0.95 ~ 1.05</strong>\nIdeal pace match'],
     ['esMatchWarn',     ko ? 'ratio &lt; 0.60 → 완전 오버페이스\n무리하게 따라가면 <strong>부상 위험</strong>' : 'ratio &lt; 0.60 → Way overpaced\n<strong>Risk of injury</strong> if you push too hard'],
@@ -4995,14 +5006,16 @@ function runGrade(paceSec, l) {
   l = l || lang;
   if (!paceSec || paceSec <= 0) return null;
   if (l === 'ko') {
-    if (paceSec < 210) return '엘리트';
-    if (paceSec < 270) return '상급';
-    if (paceSec < 330) return '중급';
+    if (paceSec < 210) return '엘리트';   // 3'30" 미만
+    if (paceSec < 255) return '상급';     // 4'15" 미만
+    if (paceSec < 300) return '중급';     // 5'00" 미만
+    if (paceSec < 345) return '초급';     // 5'45" 미만
     return '입문';
   } else {
     if (paceSec < 210) return 'Elite';
-    if (paceSec < 270) return 'Advanced';
-    if (paceSec < 330) return 'Intermediate';
+    if (paceSec < 255) return 'Advanced';
+    if (paceSec < 300) return 'Intermediate';
+    if (paceSec < 345) return 'Beginner+';
     return 'Beginner';
   }
 }
