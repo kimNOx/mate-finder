@@ -2449,8 +2449,9 @@ function meetingStatus(m){
   const elapsed=now-m.departAt;
   if(elapsed<0)return'future';
   if(elapsed>=EXPIRY_MS)return'expired';
-  // Also expire if all participants ended
-  if(m.joinedUsers.size>0&&m.joinedUsers.size===m.endedUsers.size)return'expired';
+  // 호스트 포함 전원 종료 시 즉시 expired
+  const allMembers = new Set([m.host.id, ...(m.joinedUsers ?? [])].filter(Boolean));
+  if(allMembers.size > 0 && [...allMembers].every(uid => m.endedUsers.has(uid))) return'expired';
   return'running';
 }
 
