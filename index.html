@@ -372,7 +372,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .join-btn:disabled{opacity:.35;cursor:not-allowed;}
 .end-btn{padding:14px 18px;border:1px solid var(--border);border-radius:12px;
   background:rgba(255,77,109,.1);color:#ff4d6d;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
-.cancel-join-btn{
+.gpx-download-btn{
+  width:100%;padding:11px;border-radius:12px;
+  border:1px solid rgba(0,180,255,.4);
+  background:rgba(0,180,255,.08);
+  color:var(--a2);font-family:var(--mono);font-size:11px;font-weight:700;
+  cursor:pointer;transition:all .18s;display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.gpx-download-btn:hover{background:rgba(0,180,255,.16);border-color:var(--a2);}
   flex:1;padding:12px;border-radius:12px;border:1px solid rgba(255,209,102,.4);
   background:rgba(255,209,102,.1);color:#ffd166;font-family:var(--mono);
   font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;
@@ -2027,6 +2034,12 @@ body.fp-open #chatPanel{right:260px;}
         <button class="end-btn"         id="endBtn"        onclick="handleEnd()" data-i18n-text="end_run">종료</button>
         <button class="delete-meet-btn" id="deleteMeetBtn" onclick="handleDeleteMeeting()" style="display:none">모임취소</button>
       </div>
+      <!-- GPX 다운로드 -->
+      <div id="gpxDownloadWrap" style="display:none;margin-top:10px;">
+        <button class="gpx-download-btn" onclick="downloadGpx()">
+          🗺️ GPX 코스 파일 다운로드
+        </button>
+      </div>
       <!-- attendees: add as friend -->
       <div class="meeting-attendees" id="meetingAttendees" style="display:none">
         <div class="ma-title" id="maTitle">PARTICIPANTS — 친구로 추가</div>
@@ -2760,7 +2773,47 @@ let leafletMarkers = {};
 let currentMeeting = null;
 let globalResult   = null;
 
-// ── GPX 관련 전역 변수 ──────────────────────────────────────
+// ── GPX 다운로드 ─────────────────────────────────────────────
+function downloadGpx() {
+  if (!currentMeeting?.gpxCoords?.length) {
+    showToast('A', lang==='ko'?'GPX 데이터가 없습니다':'No GPX data available');
+    return;
+  }
+  const m       = currentMeeting;
+  const title   = m.title.replace(/[<>&'"]/g, '') || 'course';
+  const coords  = m.gpxCoords;
+
+  // GPX XML 생성
+  const trkpts = coords.map(c =>
+    `      <trkpt lat="${c.lat}" lon="${c.lng}"></trkpt>`
+  ).join('\n');
+
+  const gpxXml = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="mate-finder"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>${title}</name>
+  </metadata>
+  <trk>
+    <name>${title}</name>
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+  // 다운로드 트리거
+  const blob = new Blob([gpxXml], { type: 'application/gpx+xml' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `${title}.gpx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('B', lang==='ko'?'✓ GPX 파일 다운로드 완료':'✓ GPX downloaded');
+}
 let gpxPolylines      = {};   // { meetingId: L.polyline }
 let currentSelectedId = null; // 1차 클릭으로 선택된 모임 ID
 
@@ -3056,6 +3109,14 @@ async function renderBS(m){
 
   // ── Meeting attendees (add as friend) ───────────────────
   await renderMeetingAttendees(m);
+
+  // GPX 다운로드 버튼 표시/숨김
+  const gpxWrap = document.getElementById('gpxDownloadWrap');
+  if (gpxWrap) {
+    gpxWrap.style.display = m.gpxCoords?.length ? 'block' : 'none';
+    const gpxBtn = gpxWrap.querySelector('.gpx-download-btn');
+    if (gpxBtn) gpxBtn.textContent = `🗺️ ${lang==='ko'?'GPX 코스 파일 다운로드':'Download GPX Course'}`;
+  }
 }
 
 // ── Firestore 모임 업데이트 헬퍼 ─────────────────────────────
@@ -3543,7 +3604,7 @@ async function submitCreate() {
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
-  // GPX 파일 파싱 → 좌표 배열 추출 (최대 500포인트로 간략화)
+  // GPX 파일 파싱 → 좌표 배열 추출 (최대 5000포인트)
   let gpxCoords = [];
   const gpxFile = _attachFiles.find(a => a.file.name.toLowerCase().endsWith('.gpx'));
   if (gpxFile) {
@@ -3551,8 +3612,8 @@ async function submitCreate() {
       const gpxText = await gpxFile.file.text();
       const raw     = parseGpx(gpxText);
       // 포인트가 많으면 균등 샘플링
-      if (raw.length > 500) {
-        const step = Math.ceil(raw.length / 500);
+      if (raw.length > 5000) {
+        const step = Math.ceil(raw.length / 5000);
         gpxCoords  = raw.filter((_, i) => i % step === 0);
       } else {
         gpxCoords  = raw;
