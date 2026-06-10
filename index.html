@@ -3663,8 +3663,10 @@ function openCreate() {
   // Reset location
   pendingLatLng = null;
   document.getElementById('locDisplay').className = 'loc-picked empty';
-  document.getElementById('locIcon').textContent  = '📍';
-  document.getElementById('locText').textContent  = lang === 'ko' ? '지도를 클릭하여 장소를 선택하세요' : 'Click the map to set location';
+  const locIcon = document.getElementById('locIcon');
+  const locText = document.getElementById('locText');
+  if (locIcon) locIcon.textContent = '📍';
+  if (locText) locText.textContent = lang === 'ko' ? '지도를 클릭하여 장소를 선택하세요' : 'Click the map to set location';
   // 5번: 필터 종목 자동선택 (all이면 run 기본)
   const fType = document.getElementById('fType');
   const activeCat = CatFilter.cat !== 'all' ? CatFilter.cat : 'run';
