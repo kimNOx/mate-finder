@@ -2458,41 +2458,6 @@ function setLang(l){
   const ucLogoutLbl = document.getElementById('ucLogoutLbl');
   if(ucLogoutLbl) ucLogoutLbl.textContent = tx('logout_lbl');
 
-  // ── 인증 화면 ────────────────────────────────────────────────
-  const tabLogin  = document.getElementById('tabLogin');
-  const tabSignup = document.getElementById('tabSignup');
-  const liSubmit  = document.getElementById('liSubmit');
-  const suSubmit  = document.getElementById('suSubmit');
-  if(tabLogin)  tabLogin.textContent  = tx('tab_login');
-  if(tabSignup) tabSignup.textContent = tx('tab_signup');
-  if(liSubmit && liSubmit.textContent)  liSubmit.textContent  = tx('login_btn');
-  if(suSubmit && suSubmit.textContent)  suSubmit.textContent  = tx('signup_btn');
-  // 폼 라벨
-  document.querySelectorAll('.af-lbl').forEach(el => {
-    const t = el.textContent.trim().split(' ')[0]; // 첫 단어만 비교
-    if(t === '이메일' || t === 'Email')     el.textContent = tx('lbl_email');
-    if(t === '비밀번호' || t === 'Password') {
-      if(el.nextElementSibling?.querySelector('#suPw2')) return;
-      el.textContent = tx('lbl_pw');
-    }
-    if(t === '닉네임' || t === 'Nickname')  el.textContent = tx('lbl_nick');
-  });
-  // 비밀번호 확인 라벨 (텍스트로 찾기)
-  document.querySelectorAll('.af-lbl').forEach(el => {
-    if(el.textContent.includes('비밀번호 확인') || el.textContent.includes('Confirm'))
-      el.textContent = tx('lbl_pw2');
-  });
-  // placeholder
-  const liPw  = document.getElementById('liPw');
-  const suPw  = document.getElementById('suPw');
-  const suPw2 = document.getElementById('suPw2');
-  if(liPw)  liPw.placeholder  = tx('pw_placeholder');
-  if(suPw)  suPw.placeholder  = tx('pw_placeholder');
-  if(suPw2) suPw2.placeholder = tx('pw2_placeholder');
-  // 닉네임 미리보기 서브
-  const npSub = document.querySelector('.np-sub');
-  if(npSub) npSub.textContent = tx('nick_preview_sub');
-
   // ── ES 모달 닫기 버튼 ───────────────────────────────────────
   // (이미 _updateEsModal에서 처리)
 
