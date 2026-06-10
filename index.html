@@ -1672,6 +1672,14 @@ body.fp-open #chatPanel{right:260px;}
 <!-- ── AUTH SCREEN ── -->
 <div id="authScreen">
   <div class="auth-card">
+    <!-- 언어 선택 -->
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+      <div class="lang-toggle">
+        <button class="lb on" id="authBKO" onclick="setLang('ko')">KO</button>
+        <button class="lb"    id="authBEN" onclick="setLang('en')">EN</button>
+      </div>
+    </div>
+
     <div class="auth-logo">
       <div class="auth-logo-icon">🏃</div>
       <div>
@@ -1689,7 +1697,7 @@ body.fp-open #chatPanel{right:260px;}
     <!-- LOGIN FORM -->
     <div class="auth-form" id="loginForm">
       <div class="af-field">
-        <div class="af-lbl">이메일</div>
+        <div class="af-lbl" id="liEmailLbl">이메일</div>
         <div class="af-input-wrap">
           <input class="af-input" id="liEmail" type="email" placeholder="example@email.com" oninput="validateLoginEmail()">
           <span class="af-icon" id="liEmailIcon"></span>
@@ -1697,7 +1705,7 @@ body.fp-open #chatPanel{right:260px;}
         <div class="af-msg" id="liEmailMsg"></div>
       </div>
       <div class="af-field">
-        <div class="af-lbl">비밀번호</div>
+        <div class="af-lbl" id="liPwLbl">비밀번호</div>
         <div class="af-input-wrap">
           <input class="af-input" id="liPw" type="password" placeholder="비밀번호 입력" oninput="validateLoginPw()">
           <span class="af-icon">🔒</span>
@@ -1710,7 +1718,7 @@ body.fp-open #chatPanel{right:260px;}
     <!-- SIGNUP FORM -->
     <div class="auth-form hidden" id="signupForm">
       <div class="af-field">
-        <div class="af-lbl">이메일</div>
+        <div class="af-lbl" id="suEmailLbl">이메일</div>
         <div class="af-input-wrap">
           <input class="af-input" id="suEmail" type="email" placeholder="example@email.com" oninput="validateSuEmail()">
           <span class="af-icon" id="suEmailIcon"></span>
@@ -1718,7 +1726,7 @@ body.fp-open #chatPanel{right:260px;}
         <div class="af-msg" id="suEmailMsg"></div>
       </div>
       <div class="af-field">
-        <div class="af-lbl">닉네임 <span style="color:var(--muted);font-size:8px">(2~12자, 한글/영문/숫자)</span></div>
+        <div class="af-lbl" id="suNickLbl">닉네임 <span style="color:var(--muted);font-size:8px" id="suNickHint">(2~12자, 한글/영문/숫자)</span></div>
         <div class="af-input-wrap">
           <input class="af-input" id="suNick" type="text" placeholder="예: 한강러너" maxlength="12" oninput="validateSuNick()">
           <span class="af-icon" id="suNickIcon"></span>
@@ -1730,19 +1738,19 @@ body.fp-open #chatPanel{right:260px;}
         <div class="np-avatar" id="npAvatar">🏃</div>
         <div>
           <div class="np-name" id="npName">—</div>
-          <div class="np-sub">mate finder 닉네임 미리보기</div>
+          <div class="np-sub" id="npSub">mate finder 닉네임 미리보기</div>
         </div>
       </div>
       <div class="af-field">
-        <div class="af-lbl">비밀번호</div>
+        <div class="af-lbl" id="suPwLbl">비밀번호</div>
         <div class="af-input-wrap">
-          <input class="af-input" id="suPw" type="password" placeholder="8자 이상" oninput="validateSuPw()">
+          <input class="af-input" id="suPw" type="password" placeholder="6자 이상" oninput="validateSuPw()">
           <span class="af-icon">🔒</span>
         </div>
         <div class="af-msg" id="suPwMsg"></div>
       </div>
       <div class="af-field">
-        <div class="af-lbl">비밀번호 확인</div>
+        <div class="af-lbl" id="suPw2Lbl">비밀번호 확인</div>
         <div class="af-input-wrap">
           <input class="af-input" id="suPw2" type="password" placeholder="동일하게 입력" oninput="validateSuPw2()">
           <span class="af-icon" id="suPw2Icon"></span>
@@ -1927,7 +1935,7 @@ body.fp-open #chatPanel{right:260px;}
 <!-- FAB create -->
 <button class="fab" onclick="openCreate()" title="모임 만들기">
   <span style="font-size:20px;">＋</span>
-  <span style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:-.3px;">새 모임</span>
+  <span id="fabLbl" style="font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:-.3px;">새 모임</span>
 </button>
 
 <!-- ── 주변 모임 없음 빈 상태 ── -->
@@ -2498,6 +2506,95 @@ function setLang(l){
   if(document.getElementById('fbOv')?.classList.contains('on') && _fbCat) _fbApplyCat(_fbCat);
   if(globalResult?.cat === 'run' && globalResult?.source !== 'manual') onResolved();
   _checkEmptyState();
+
+  // ── 로그인 화면 언어 토글 버튼 상태 동기화 ──────────────────
+  document.getElementById('authBKO')?.classList.toggle('on', ko);
+  document.getElementById('authBEN')?.classList.toggle('on', !ko);
+
+  // ── 로그인/회원가입 폼 텍스트 ───────────────────────────────
+  const tabLogin  = document.getElementById('tabLogin');
+  const tabSignup = document.getElementById('tabSignup');
+  if (tabLogin)  tabLogin.textContent  = ko ? '로그인'  : 'Login';
+  if (tabSignup) tabSignup.textContent = ko ? '회원가입' : 'Sign Up';
+
+  // 로그인 폼
+  const liEmailLbl = document.getElementById('liEmailLbl');
+  const liPwLbl    = document.getElementById('liPwLbl');
+  const liPw       = document.getElementById('liPw');
+  const liSubmit   = document.getElementById('liSubmit');
+  if (liEmailLbl) liEmailLbl.textContent = ko ? '이메일' : 'Email';
+  if (liPwLbl)    liPwLbl.textContent    = ko ? '비밀번호' : 'Password';
+  if (liPw)       liPw.placeholder       = ko ? '비밀번호 입력' : 'Enter password';
+  if (liSubmit && liSubmit.textContent !== (ko?'로그인 중...':'Signing in...'))
+    liSubmit.textContent = ko ? '로그인' : 'Login';
+
+  // 회원가입 폼
+  const suEmailLbl = document.getElementById('suEmailLbl');
+  const suNickLbl  = document.getElementById('suNickLbl');
+  const suNickHint = document.getElementById('suNickHint');
+  const suNick     = document.getElementById('suNick');
+  const suPwLbl    = document.getElementById('suPwLbl');
+  const suPw       = document.getElementById('suPw');
+  const suPw2Lbl   = document.getElementById('suPw2Lbl');
+  const suPw2      = document.getElementById('suPw2');
+  const suSubmit   = document.getElementById('suSubmit');
+  const npSub      = document.getElementById('npSub');
+  if (suEmailLbl) suEmailLbl.textContent = ko ? '이메일' : 'Email';
+  if (suNickLbl)  suNickLbl.childNodes[0].textContent = ko ? '닉네임 ' : 'Nickname ';
+  if (suNickHint) suNickHint.textContent = ko ? '(2~12자, 한글/영문/숫자)' : '(2-12 chars, letters/numbers)';
+  if (suNick)     suNick.placeholder     = ko ? '예: 한강러너' : 'e.g. RiverRunner';
+  if (suPwLbl)    suPwLbl.textContent    = ko ? '비밀번호' : 'Password';
+  if (suPw)       suPw.placeholder       = ko ? '6자 이상' : 'Min 6 characters';
+  if (suPw2Lbl)   suPw2Lbl.textContent   = ko ? '비밀번호 확인' : 'Confirm Password';
+  if (suPw2)      suPw2.placeholder      = ko ? '동일하게 입력' : 'Re-enter password';
+  if (suSubmit && suSubmit.textContent !== (ko?'가입 중...':'Creating...'))
+    suSubmit.textContent = ko ? '가입하기' : 'Sign Up';
+  if (npSub)      npSub.textContent      = ko ? 'mate finder 닉네임 미리보기' : 'Nickname preview';
+
+  // FAB 버튼
+  const fabLbl = document.getElementById('fabLbl');
+  if (fabLbl) fabLbl.textContent = ko ? '새 모임' : 'New';
+
+  // 모임 생성 모달
+  const fTitle = document.getElementById('fTitle');
+  if (fTitle) fTitle.placeholder = ko ? '예: 한강 새벽 크루런' : 'e.g. Morning River Run';
+
+  const locSearchInput = document.getElementById('locSearchInput');
+  if (locSearchInput) locSearchInput.placeholder = ko ? '장소 또는 주소 검색...' : 'Search place or address...';
+
+  const fAttachLbl = document.getElementById('fAttachLbl');
+  if (fAttachLbl) fAttachLbl.innerHTML = ko
+    ? '📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span>'
+    : '📎 Attachment <span style="color:var(--muted);font-size:9px;">(GPX · Photo, optional)</span>';
+
+  const attachDropTxt = document.getElementById('attachDropTxt');
+  if (attachDropTxt) attachDropTxt.textContent = ko
+    ? '여기에 파일을 끌어다 놓거나 클릭하여 선택'
+    : 'Drag & drop or click to select';
+
+  // 위치 검색 버튼
+  document.querySelectorAll('.loc-search-btn').forEach(btn => {
+    btn.textContent = ko ? '검색' : 'Search';
+  });
+
+  // 수동입력 버튼 (지도클릭)
+  const startPickBtn = document.querySelector('[onclick="startPickLocation()"]');
+  if (startPickBtn) startPickBtn.textContent = ko ? '📍 지도에서 선택' : '📍 Pick on Map';
+
+  // 모임개설/취소 버튼
+  const createSubmitBtn = document.querySelector('#createOv .btn-primary');
+  if (createSubmitBtn && !createSubmitBtn.disabled)
+    createSubmitBtn.textContent = ko ? '모임 개설' : 'Create Meeting';
+
+  const createCancelBtn = document.querySelector('#createOv .btn-cancel');
+  if (createCancelBtn) createCancelBtn.textContent = ko ? '취소' : 'Cancel';
+
+  // Fallback 모달 드롭박스 옵션
+  const fbCatSelect = document.getElementById('fbCatSelect');
+  if (fbCatSelect) {
+    fbCatSelect.options[0].text = ko ? '🏃 직접 입력 (러닝)' : '🏃 Manual Input (Run)';
+    fbCatSelect.options[1].text = ko ? '🚴 직접 입력 (라이딩)' : '🚴 Manual Input (Ride)';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
