@@ -3196,7 +3196,7 @@ async function renderBS(m){
     }
     endBtn.style.display        = 'none';
     deleteMeetBtn.style.display = isHost ? 'flex' : 'none';
-      if (isHost) deleteMeetBtn.textContent = lang==='ko' ? '모임취소' : 'Cancel Meeting';     
+    if (isHost) deleteMeetBtn.textContent = lang==='ko' ? '모임취소' : 'Cancel Meeting';
   } else if (status === 'running') {
     joinBtn.style.display       = 'none';
     cancelJoinBtn.style.display = 'none';
@@ -5096,37 +5096,50 @@ function updateHudUnit() {
 }
 // ── 출발시간 커스텀 드롭다운 초기화 ─────────────────────────
 function initDeptDropdowns() {
-  const now   = new Date();
+  const now     = new Date();
+  const ko      = lang === 'ko';
   const monthEl = document.getElementById('deptMonth');
   const dayEl   = document.getElementById('deptDay');
   if (!monthEl || !dayEl) return;
+
+  const monthNames = ko
+    ? ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월']
+    : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   // 월 옵션: 이번 달 ~ 3개월 후
   monthEl.innerHTML = '';
   for (let i = 0; i < 3; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const m = d.getMonth() + 1;
+    const m = d.getMonth();
     const y = d.getFullYear();
-    monthEl.innerHTML += `<option value="${y}-${String(m).padStart(2,'0')}">${m}월</option>`;
+    const val = `${y}-${String(m+1).padStart(2,'0')}`;
+    const lbl = ko ? `${m+1}월` : monthNames[m];
+    monthEl.innerHTML += `<option value="${val}">${lbl}</option>`;
   }
 
-  // 월 변경 시 일 옵션 갱신
   monthEl.onchange = () => { updateDayOptions(); syncDeptTime(); };
-
   updateDayOptions();
 
   // 시간 옵션: 1~12
   const hourEl = document.getElementById('deptHour');
   hourEl.innerHTML = '';
   for (let h = 1; h <= 12; h++) {
-    hourEl.innerHTML += `<option value="${h}">${h}시</option>`;
+    hourEl.innerHTML += `<option value="${h}">${ko ? `${h}시` : h}</option>`;
   }
 
   // 분 옵션: 10분 단위
   const minEl = document.getElementById('deptMin');
   minEl.innerHTML = '';
   for (let m = 0; m < 60; m += 10) {
-    minEl.innerHTML += `<option value="${m}">${String(m).padStart(2,'0')}분</option>`;
+    const lbl = ko ? `${String(m).padStart(2,'0')}분` : `:${String(m).padStart(2,'0')}`;
+    minEl.innerHTML += `<option value="${m}">${lbl}</option>`;
+  }
+
+  // 오전/오후 옵션
+  const ampmEl = document.getElementById('deptAmpm');
+  if (ampmEl) {
+    ampmEl.options[0].text = ko ? '오전' : 'AM';
+    ampmEl.options[1].text = ko ? '오후' : 'PM';
   }
 
   // 기본값: 현재 시간 + 1시간, 10분 반올림
@@ -5134,16 +5147,13 @@ function initDeptDropdowns() {
   def.setMinutes(Math.ceil(def.getMinutes()/10)*10, 0, 0);
   if (def.getMinutes() === 60) { def.setHours(def.getHours()+1); def.setMinutes(0); }
 
-  // 월 기본값
   const defM = `${def.getFullYear()}-${String(def.getMonth()+1).padStart(2,'0')}`;
   if (monthEl.querySelector(`option[value="${defM}"]`)) monthEl.value = defM;
   updateDayOptions();
 
-  // 일 기본값
   const defDay = def.getDate();
   if (dayEl.querySelector(`option[value="${defDay}"]`)) dayEl.value = defDay;
 
-  // 오전/오후, 시, 분 기본값
   const h24  = def.getHours();
   const ampm = h24 < 12 ? 'AM' : 'PM';
   const h12  = h24 % 12 || 12;
@@ -5162,6 +5172,7 @@ function updateDayOptions() {
   const dayEl   = document.getElementById('deptDay');
   if (!monthEl || !dayEl) return;
 
+  const ko       = lang === 'ko';
   const [y, m]   = monthEl.value.split('-').map(Number);
   const now      = new Date();
   const daysInM  = new Date(y, m, 0).getDate();
@@ -5170,9 +5181,8 @@ function updateDayOptions() {
 
   dayEl.innerHTML = '';
   for (let d = startDay; d <= daysInM; d++) {
-    dayEl.innerHTML += `<option value="${d}">${d}일</option>`;
+    dayEl.innerHTML += `<option value="${d}">${ko ? `${d}일` : d}</option>`;
   }
-  // 이전 선택일 유지 (가능하면)
   if (dayEl.querySelector(`option[value="${prevDay}"]`)) dayEl.value = prevDay;
 }
 
@@ -5247,9 +5257,9 @@ function onResolved() {
   document.getElementById('hudScore').textContent = displayScore;
 
   const badge = document.getElementById('hudBadge');
-  if      (globalResult?.source === 'manual')  { badge.textContent = '수동입력'; badge.className = 'sp-badge manual'; }
-  else if (globalResult?.source === 'gray')    { badge.textContent = '구경모드'; badge.className = 'sp-badge warn'; }
-  else                                         { badge.textContent = `수동입력`; badge.className = 'sp-badge'; }
+  if      (globalResult?.source === 'manual')  { badge.textContent = lang==='ko'?'수동입력':'Manual'; badge.className = 'sp-badge manual'; }
+  else if (globalResult?.source === 'gray')    { badge.textContent = lang==='ko'?'구경모드':'Guest';  badge.className = 'sp-badge warn'; }
+  else                                         { badge.textContent = lang==='ko'?'수동입력':'Manual'; badge.className = 'sp-badge'; }
 
   // HUD 로고 아이콘 — CatFilter 기준
   const logoIcon = document.querySelector('.logo-icon');
