@@ -2472,6 +2472,9 @@ function setLang(l){
   if(globalResult?.cat === 'run' && globalResult?.source !== 'manual') onResolved();
   _checkEmptyState();
 
+  // ── 미번역 UI 요소 일괄 처리 ─────────────────────────────────
+  const ko = (l === 'ko');
+
   // ── 로그인 화면 언어 토글 버튼 상태 동기화 ──────────────────
   document.getElementById('authBKO')?.classList.toggle('on', ko);
   document.getElementById('authBEN')?.classList.toggle('on', !ko);
@@ -2481,9 +2484,6 @@ function setLang(l){
   const tabSignup = document.getElementById('tabSignup');
   if (tabLogin)  tabLogin.textContent  = ko ? '로그인'  : 'Login';
   if (tabSignup) tabSignup.textContent = ko ? '회원가입' : 'Sign Up';
-
-  // 로그인 폼
-  const liEmailLbl = document.getElementById('liEmailLbl');
   const liPwLbl    = document.getElementById('liPwLbl');
   const liPw       = document.getElementById('liPw');
   const liSubmit   = document.getElementById('liSubmit');
