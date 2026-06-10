@@ -3196,6 +3196,7 @@ async function renderBS(m){
     }
     endBtn.style.display        = 'none';
     deleteMeetBtn.style.display = isHost ? 'flex' : 'none';
+      if (isHost) deleteMeetBtn.textContent = lang==='ko' ? '모임취소' : 'Cancel Meeting';     
   } else if (status === 'running') {
     joinBtn.style.display       = 'none';
     cancelJoinBtn.style.display = 'none';
