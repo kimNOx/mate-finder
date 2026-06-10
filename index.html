@@ -2469,7 +2469,7 @@ function setLang(l){
   updateHudUnit();
   if(document.getElementById('esModalOv')?.classList.contains('on')) _updateEsModal();
   if(document.getElementById('fbOv')?.classList.contains('on') && _fbCat) _fbApplyCat(_fbCat);
-  if(globalResult?.cat === 'run' && globalResult?.source !== 'manual') onResolved();
+  if(globalResult) onResolved();
   _checkEmptyState();
 
   // ── 미번역 UI 요소 일괄 처리 ─────────────────────────────────
