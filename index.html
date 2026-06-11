@@ -3204,9 +3204,14 @@ async function renderBS(m){
   } else if (status === 'running') {
     joinBtn.style.display       = 'none';
     cancelJoinBtn.style.display = 'none';
-    endBtn.style.display        = 'flex';
-    endBtn.disabled             = hasEnded;
-    endBtn.textContent          = hasEnded ? (lang==='ko'?'종료 완료':'Ended') : D.end_run;
+    // 호스트 또는 참여자만 종료 버튼 표시
+    if (isHost || hasJoined) {
+      endBtn.style.display  = 'flex';
+      endBtn.disabled       = hasEnded;
+      endBtn.textContent    = hasEnded ? (lang==='ko'?'종료 완료':'Ended') : D.end_run;
+    } else {
+      endBtn.style.display  = 'none';
+    }
     deleteMeetBtn.style.display = 'none';
   } else {
     // expired
