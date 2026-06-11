@@ -238,7 +238,8 @@ window._startMeetingsListener = function() {
   --accent:#00f5a0;--a2:#00b4ff;--warn:#ffd166;
   --red:#ff4d6d;--yellow:#ffd166;--green:#06d6a0;--gray:#4a5568;
   --text:#dde6f0;--muted:#4a5568;
-  --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --sans:'Syne',ui-sans-serif,-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden;}
@@ -2469,7 +2470,7 @@ function setLang(l){
   updateHudUnit();
   if(document.getElementById('esModalOv')?.classList.contains('on')) _updateEsModal();
   if(document.getElementById('fbOv')?.classList.contains('on') && _fbCat) _fbApplyCat(_fbCat);
-  if(globalResult) onResolved();
+  if(globalResult?.cat === 'run' && globalResult?.source !== 'manual') onResolved();
   _checkEmptyState();
 
   // ── 미번역 UI 요소 일괄 처리 ─────────────────────────────────
@@ -3183,8 +3184,11 @@ async function renderBS(m){
   joinBtn.textContent = D.join_btn;
 
   if (status === 'future') {
-    if (hasJoined) {
-      // 참여 완료 → 참여취소 버튼 표시
+    if (isHost) {
+      // 호스트는 참여하기/취소 버튼 없음
+      joinBtn.style.display       = 'none';
+      cancelJoinBtn.style.display = 'none';
+    } else if (hasJoined) {
       joinBtn.style.display       = 'none';
       cancelJoinBtn.style.display = 'flex';
       cancelJoinBtn.disabled      = false;
@@ -4178,8 +4182,17 @@ async function openMannerModal(meeting) {
   _mannerMeeting    = meeting;
   _mannerSelections = {};
 
-  const uids = [...new Set([meeting.host.id, ...(meeting.joinedUsers ?? [])])]
-    .filter(uid => uid && uid !== currentUser.id);
+  // 나를 완전히 제외한 참여자 목록
+  const myUid = currentUser.id;
+  const allUids = new Set([
+    meeting.host.id,
+    ...(meeting.joinedUsers ?? [])
+  ]);
+  allUids.delete(myUid);  // 나 자신 제거
+  allUids.delete('');     // 빈 값 제거
+  allUids.delete(undefined);
+
+  const uids = [...allUids];
 
   if (!uids.length) {
     showToast('B', lang==='ko'?'수고하셨습니다! 🎉':'Great job! 🎉');
