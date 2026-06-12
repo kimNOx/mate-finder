@@ -3071,6 +3071,33 @@ function closeBS(){
 }
 
 async function renderBS(m){
+  // 데이터 유효성 체크 - Safari에서 빈 데이터로 열릴 경우 대비
+  if (!m || !m.id) return;
+
+  // Firestore에서 최신 데이터 재확인 (title/host.name이 비어있으면)
+  if (!m.title && !m.host?.name) {
+    try {
+      const { doc, getDoc } = window._fb;
+      const snap = await getDoc(doc(window._fbDb, 'meetings', m.id));
+      if (snap.exists()) {
+        const data = snap.data();
+        m.title      = data.title ?? '';
+        m.host       = {
+          id:    data.hostUid   ?? '',
+          name:  data.hostName  ?? '',
+          score: data.hostScore ?? 0,
+          cat:   data.hostCat   ?? 'run',
+        };
+        m.distKm     = data.distKm ?? 0;
+        m.departAt   = data.departAt ?? Date.now();
+        m.maxP       = data.maxP ?? 8;
+        m.joinedUsers = new Set(data.participantUids ?? []);
+        m.endedUsers  = new Set(data.endedUids ?? []);
+        m.gpxCoords   = data.gpxCoords ?? [];
+      }
+    } catch(e) { console.warn('[renderBS] refetch failed:', e); }
+  }
+
   const status=meetingStatus(m);
   const D=I18N[lang];
 
@@ -3098,9 +3125,10 @@ async function renderBS(m){
   }
 
   // ── Host ────────────────────────────────────────
-  const avEmoji=['🏃','⚡','🚴','🌄'][MEETINGS.indexOf(m)]??'👤';
+  const meetIdx = (window.MEETINGS || []).findIndex(x => x.id === m.id);
+  const avEmoji = ['🏃','⚡','🚴','🌄'][meetIdx] ?? '👤';
   document.getElementById('bsAv').textContent=avEmoji;
-  document.getElementById('bsHostName').textContent=m.host.name;
+  document.getElementById('bsHostName').textContent=m.host.name || '—';
 
   // 정확한 점수 대신 등급명만 표시
   function hostGradeLabel(score, cat, lang) {
@@ -4123,10 +4151,10 @@ async function submitInvite() {
 // ═══════════════════════════════════════════════════════════════
 
 const MANNER_ITEMS = [
-  { id:'time',   icon:'⏰', labelKo:'시간 약속을 잘 지켰어요',   labelEn:'Was punctual',         delta:+0.2, type:'positive' },
-  { id:'pace',   icon:'🤝', labelKo:'페이스를 잘 배려해줬어요',  labelEn:'Considerate of pace',  delta:+0.2, type:'positive' },
-  { id:'safe',   icon:'🔰', labelKo:'안전하게 이끌어줬어요',     labelEn:'Led safely',           delta:+0.2, type:'positive' },
-  { id:'mood',   icon:'😄', labelKo:'분위기가 즐거웠어요',       labelEn:'Great atmosphere',     delta:+0.2, type:'positive' },
+  { id:'time',   icon:'⏰', labelKo:'시간 약속을 잘 지켰어요',   labelEn:'Was punctual',         delta:+0.5, type:'positive' },
+  { id:'pace',   icon:'🤝', labelKo:'페이스를 잘 배려해줬어요',  labelEn:'Considerate of pace',  delta:+0.5, type:'positive' },
+  { id:'safe',   icon:'🔰', labelKo:'안전하게 이끌어줬어요',     labelEn:'Led safely',           delta:+0.5, type:'positive' },
+  { id:'mood',   icon:'😄', labelKo:'분위기가 즐거웠어요',       labelEn:'Great atmosphere',     delta:+0.3, type:'positive' },
   { id:'again',  icon:'🔥', labelKo:'또 함께 달리고 싶어요',     labelEn:'Would run again',      delta:+0.5, type:'positive' },
   { id:'noshow', icon:'😤', labelKo:'무단 불참했어요',           labelEn:'No-show',              delta:-1.0, type:'negative' },
 ];
