@@ -1671,7 +1671,7 @@ body.fp-open #chatPanel{right:260px;}
 }
 .map-empty.on{opacity:1;}
 .map-empty-icon{font-size:36px;}
-.map-empty-txt{font-family:var(--mono);font-size:12px;color:var(--muted);
+.map-empty-txt{font-family:var(--mono);font-size:12px;color:var(--accent);
   text-align:center;line-height:1.6;white-space:pre-line;}
 .map-empty-btn{
   pointer-events:all;  /* 버튼만 클릭 가능 */
@@ -1977,6 +1977,13 @@ body.fp-open #chatPanel{right:260px;}
 <div class="onboard-ov" id="onboardOv">
   <div class="onboard-modal">
     <div class="onboard-header">
+      <!-- 언어 토글 -->
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <div class="lang-toggle">
+          <button class="lb" id="obBKO" onclick="setLang('ko')">KO</button>
+          <button class="lb" id="obBEN" onclick="setLang('en')">EN</button>
+        </div>
+      </div>
       <div class="onboard-logo">🏃🚴</div>
       <div class="onboard-title">mate finder</div>
       <div class="onboard-sub" id="obSub">러닝·라이딩 메이트를 찾아보세요!</div>
@@ -2006,23 +2013,23 @@ body.fp-open #chatPanel{right:260px;}
       <div class="onboard-section-title" id="obTierTitle">🐆 난이도 티어</div>
       <div class="onboard-item">
         <div class="onboard-item-icon">🐢</div>
-        <div class="onboard-item-text">거북이 — 러닝 5'45" 이상 / 라이딩 2.5 w/kg 미만</div>
+        <div class="onboard-item-text" id="obTier1">거북이 — 러닝 5'45" 이상 / 라이딩 2.5 w/kg 미만</div>
       </div>
       <div class="onboard-item">
         <div class="onboard-item-icon">🐰</div>
-        <div class="onboard-item-text">토끼 — 러닝 5'45" 미만 / 라이딩 2.5~3.0 w/kg</div>
+        <div class="onboard-item-text" id="obTier2">토끼 — 러닝 5'45" 미만 / 라이딩 2.5~3.0 w/kg</div>
       </div>
       <div class="onboard-item">
         <div class="onboard-item-icon">🐺</div>
-        <div class="onboard-item-text">늑대 — 러닝 5'00" 미만 / 라이딩 3.0~3.5 w/kg</div>
+        <div class="onboard-item-text" id="obTier3">늑대 — 러닝 5'00" 미만 / 라이딩 3.0~3.5 w/kg</div>
       </div>
       <div class="onboard-item">
         <div class="onboard-item-icon">🦅</div>
-        <div class="onboard-item-text">독수리 — 러닝 4'15" 미만 / 라이딩 3.5~4.0 w/kg</div>
+        <div class="onboard-item-text" id="obTier4">독수리 — 러닝 4'15" 미만 / 라이딩 3.5~4.0 w/kg</div>
       </div>
       <div class="onboard-item">
         <div class="onboard-item-icon">🐆</div>
-        <div class="onboard-item-text">치타 — 러닝 3'30" 미만 / 라이딩 4.0 w/kg 이상</div>
+        <div class="onboard-item-text" id="obTier5">치타 — 러닝 3'30" 미만 / 라이딩 4.0 w/kg 이상</div>
       </div>
     </div>
 
@@ -4281,6 +4288,9 @@ function closeOnboard() {
 
 function _updateOnboardLang() {
   const ko = lang === 'ko';
+  // 토글 버튼 상태
+  document.getElementById('obBKO')?.classList.toggle('on', ko);
+  document.getElementById('obBEN')?.classList.toggle('on', !ko);
   const els = {
     obSub:       ko ? '러닝·라이딩 메이트를 찾아보세요!'      : 'Find your running & cycling mates!',
     obHowTitle:  ko ? '📍 이렇게 사용해요'                    : '📍 How to use',
@@ -4293,6 +4303,11 @@ function _updateOnboardLang() {
     obStep4:     ko ? '<strong>매너 평가</strong> — 모임 종료 후 함께한 메이트를 평가하면 매너 온도가 쌓여요 🌡️'
                     : '<strong>Rate manners</strong> — After the run, rate your mates to build your manner score 🌡️',
     obTierTitle: ko ? '🐆 난이도 티어'                         : '🐆 Difficulty Tiers',
+    obTier1:     ko ? "거북이 — 러닝 5'45\" 이상 / 라이딩 2.5 w/kg 미만"   : "Turtle — Run ≥5'45\" / Ride < 2.5 w/kg",
+    obTier2:     ko ? "토끼 — 러닝 5'45\" 미만 / 라이딩 2.5~3.0 w/kg"      : "Rabbit — Run < 5'45\" / Ride 2.5~3.0 w/kg",
+    obTier3:     ko ? "늑대 — 러닝 5'00\" 미만 / 라이딩 3.0~3.5 w/kg"      : "Wolf — Run < 5'00\" / Ride 3.0~3.5 w/kg",
+    obTier4:     ko ? "독수리 — 러닝 4'15\" 미만 / 라이딩 3.5~4.0 w/kg"    : "Eagle — Run < 4'15\" / Ride 3.5~4.0 w/kg",
+    obTier5:     ko ? "치타 — 러닝 3'30\" 미만 / 라이딩 4.0 w/kg 이상"     : "Cheetah — Run < 3'30\" / Ride ≥ 4.0 w/kg",
     obNoShow:    ko ? '다시 보지 않기'                         : "Don't show again",
   };
   Object.entries(els).forEach(([id, html]) => {
