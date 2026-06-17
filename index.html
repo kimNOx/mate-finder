@@ -341,43 +341,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .bs-body{padding:18px 22px 0;font-family:var(--sans),-apple-system,BlinkMacSystemFont,sans-serif;}
 .bs-body *{-webkit-font-smoothing:antialiased;}
 
-.map-style-btn{
-  display:flex;align-items:center;gap:4px;
-  font-size:10px;font-weight:700;padding:5px 10px;
-  border-color:rgba(0,180,255,.4);color:var(--a2);
-}
-/* ─── 지도 스타일 모달 ──────────────────────── */
-.map-style-ov{
-  position:fixed;inset:0;z-index:1200;
-  background:rgba(0,0,0,.6);backdrop-filter:blur(8px);
-  display:flex;align-items:flex-end;justify-content:center;
-  opacity:0;pointer-events:none;transition:opacity .25s;
-}
-.map-style-ov.on{opacity:1;pointer-events:all;}
-.map-style-modal{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:20px 20px 0 0;
-  width:min(100%,480px);padding:20px 20px 36px;
-  display:flex;flex-direction:column;gap:12px;
-}
-.map-style-title{
-  font-family:var(--mono);font-size:13px;font-weight:800;
-  color:var(--accent);margin-bottom:4px;
-}
-.map-style-options{display:flex;flex-direction:column;gap:8px;}
-.map-style-item{
-  display:flex;align-items:center;gap:12px;
-  padding:12px 14px;border-radius:12px;
-  background:var(--s2);border:2px solid var(--border);
-  cursor:pointer;transition:all .18s;
-}
-.map-style-item:hover{border-color:var(--a2);}
-.map-style-item.active{border-color:var(--accent);background:rgba(0,245,160,.06);}
-.map-style-item-icon{font-size:24px;}
-.map-style-item-info{flex:1;}
-.map-style-item-name{font-family:var(--mono);font-size:12px;font-weight:700;}
-.map-style-item-sub{font-size:10px;color:var(--muted);margin-top:2px;}
-.map-style-check{font-size:16px;color:var(--accent);}
 .dept-mobile{ display:none; }
 .dept-custom{ display:flex;flex-direction:column;gap:0; }
 .dept-row{ display:flex;align-items:center;gap:6px;width:100%; }
@@ -1959,9 +1922,9 @@ body.fp-open #chatPanel{right:260px;}
   <!-- 3행: 반경 + 종목 필터 (로그인 후) -->
   <div class="radius-bar" id="radiusBar">
     <span class="rb-lbl" id="rbLbl">반경</span>
-    <button class="rb-btn on" data-km="30"   onclick="setRadius(30)">30km</button>
+    <button class="rb-btn on" data-km="10"   onclick="setRadius(10)">10km</button>
+    <button class="rb-btn"    data-km="30"   onclick="setRadius(30)">30km</button>
     <button class="rb-btn"    data-km="0"    onclick="setRadius(0)" id="rbAllBtn">전체</button>
-    <button class="rb-btn map-style-btn" onclick="openMapStyleModal()" id="mapStyleBtn">🗺️ Style</button>
     <div class="rb-divider"></div>
     <select class="cat-select" id="catSelect" onchange="setCat(this.value)">
       <option value="all" id="catOptAll">🏃🚴 전체</option>
@@ -2005,40 +1968,6 @@ body.fp-open #chatPanel{right:260px;}
     <button class="btn-cancel" onclick="closeMannerModal()" style="width:100%;margin-top:8px">
       나중에 하기
     </button>
-  </div>
-</div>
-
-<!-- ── 지도 스타일 모달 ── -->
-<div class="map-style-ov" id="mapStyleOv">
-  <div class="map-style-modal">
-    <div class="map-style-title">🗺️ Map Style</div>
-    <div class="map-style-options">
-      <div class="map-style-item active" id="msDark" onclick="setMapStyle('dark')">
-        <div class="map-style-item-icon">🌑</div>
-        <div class="map-style-item-info">
-          <div class="map-style-item-name">Dark</div>
-          <div class="map-style-item-sub">CartoDB Dark Matter</div>
-        </div>
-        <div class="map-style-check" id="msDarkCheck">✓</div>
-      </div>
-      <div class="map-style-item" id="msLight" onclick="setMapStyle('light')">
-        <div class="map-style-item-icon">☀️</div>
-        <div class="map-style-item-info">
-          <div class="map-style-item-name">Light</div>
-          <div class="map-style-item-sub">CartoDB Positron</div>
-        </div>
-        <div class="map-style-check" id="msLightCheck" style="opacity:0">✓</div>
-      </div>
-      <div class="map-style-item" id="msDefault" onclick="setMapStyle('default')">
-        <div class="map-style-item-icon">🗺️</div>
-        <div class="map-style-item-info">
-          <div class="map-style-item-name">Default</div>
-          <div class="map-style-item-sub">OpenStreetMap</div>
-        </div>
-        <div class="map-style-check" id="msDefaultCheck" style="opacity:0">✓</div>
-      </div>
-    </div>
-    <button class="btn-cancel" onclick="closeMapStyleModal()" style="margin-top:4px">닫기</button>
   </div>
 </div>
 
@@ -2971,7 +2900,11 @@ const MAP = L.map('map', {
   attributionControl: true,
 });
 
-// 지도 타일은 MAP_TILES 선언 후 initMapTile()에서 초기화됨
+// 지도 타일 — OpenStreetMap Mapnik (기본)
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  maxZoom: 19,
+}).addTo(MAP);
 
 // ─── Custom SVG pin factory ──────────────────────────────────
 function makePinIcon(color, isGray=false, expired=false, catOpacity=1){
@@ -4338,58 +4271,6 @@ async function submitInvite() {
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
-//  지도 스타일
-// ═══════════════════════════════════════════════════════════════
-const MAP_TILES = {
-  dark:    { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-             attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>' },
-  light:   { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-             attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>' },
-  default: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-             attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
-};
-
-let _currentTileLayer = null;
-let _currentMapStyle  = localStorage.getItem('mf_map_style') || 'dark';
-
-function initMapTile() {
-  const tile = MAP_TILES[_currentMapStyle] || MAP_TILES.dark;
-  _currentTileLayer = L.tileLayer(tile.url, { attribution: tile.attr, maxZoom: 19 }).addTo(MAP);
-  _updateMapStyleUI();
-}
-
-// 지도 타일 즉시 초기화 (MAP_TILES 선언 직후)
-initMapTile();
-
-function setMapStyle(style) {
-  if (_currentTileLayer) MAP.removeLayer(_currentTileLayer);
-  const tile = MAP_TILES[style] || MAP_TILES.dark;
-  _currentTileLayer = L.tileLayer(tile.url, { attribution: tile.attr, maxZoom: 19 }).addTo(MAP);
-  _currentMapStyle  = style;
-  localStorage.setItem('mf_map_style', style);
-  _updateMapStyleUI();
-  closeMapStyleModal();
-}
-
-function _updateMapStyleUI() {
-  ['dark','light','default'].forEach(s => {
-    const item  = document.getElementById(`ms${s.charAt(0).toUpperCase()+s.slice(1)}`);
-    const check = document.getElementById(`ms${s.charAt(0).toUpperCase()+s.slice(1)}Check`);
-    if (item)  item.classList.toggle('active', s === _currentMapStyle);
-    if (check) check.style.opacity = s === _currentMapStyle ? '1' : '0';
-  });
-}
-
-function openMapStyleModal() {
-  document.getElementById('mapStyleOv').classList.add('on');
-  pushPanel('mapstyle');
-}
-
-function closeMapStyleModal() {
-  document.getElementById('mapStyleOv').classList.remove('on');
-  popPanel();
-}
-// ═══════════════════════════════════════════════════════════════
 function showOnboard() {
   const skip = localStorage.getItem('mf_onboard_skip');
   if (skip === 'true') return;
@@ -5228,9 +5109,6 @@ window.addEventListener('popstate', (e) => {
   if (_historyStack.length > 0) _historyStack.pop();
 
   // 열려있는 패널을 우선순위대로 닫기 (history.back 없이 직접 닫음)
-  if (document.getElementById('mapStyleOv')?.classList.contains('on')) {
-    closeMapStyleModal(); return;
-  }
   if (document.getElementById('inviteModalOv')?.classList.contains('on')) {
     document.getElementById('inviteModalOv').classList.remove('on');
     return;
