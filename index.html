@@ -3069,7 +3069,7 @@ function handleMarkerClick(m) {
     currentSelectedId = m.id;
     const pl = gpxPolylines[m.id];
     if (pl) {
-      pl.setStyle({ color:'#00f5a0', weight:6, opacity:1 });
+      pl.setStyle({ color:'#FF0099', weight:6, opacity:1 });
       pl.bringToFront();
     }
   }
@@ -3108,7 +3108,7 @@ function buildMarkers(){
       // Firestore는 {lat,lng} 객체, Leaflet은 [lat,lng] 배열 필요
       const latlngs = m.gpxCoords.map(c => [c.lat, c.lng]);
       const pl = L.polyline(latlngs, {
-        color:   isSelected ? '#00f5a0' : '#ffffff',
+        color:   isSelected ? '#FF0099' : '#ffffff',
         weight:  isSelected ? 6 : 3,
         opacity: isSelected ? 1 : 0.4,
       }).addTo(MAP);
