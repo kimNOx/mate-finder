@@ -3078,7 +3078,7 @@ function handleMarkerClick(m) {
 // ── 모든 코스 기본 상태로 리셋 ──────────────────────────────
 function _resetAllPolylines() {
   Object.values(gpxPolylines).forEach(pl => {
-    pl.setStyle({ color:'#ff99CC', weight:3, opacity:0.6 });
+    pl.setStyle({ color:'#ff0000', weight:3, opacity:0.7 });
   });
   currentSelectedId = null;
 }
@@ -3108,7 +3108,7 @@ function buildMarkers(){
       // Firestore는 {lat,lng} 객체, Leaflet은 [lat,lng] 배열 필요
       const latlngs = m.gpxCoords.map(c => [c.lat, c.lng]);
       const pl = L.polyline(latlngs, {
-        color:   isSelected ? '#FF0099' : '#ff99CC',
+        color:   isSelected ? '#FF0099' : '#ff0000',
         weight:  isSelected ? 6 : 3,
         opacity: isSelected ? 1 : 0.6,
       }).addTo(MAP);
