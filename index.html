@@ -3110,7 +3110,7 @@ function buildMarkers(){
       const pl = L.polyline(latlngs, {
         color:   isSelected ? '#FF0099' : '#ff99CC',
         weight:  isSelected ? 6 : 3,
-        opacity: isSelected ? 1 : 0.4,
+        opacity: isSelected ? 1 : 0.6,
       }).addTo(MAP);
       pl.on('click', () => handleMarkerClick(m));
       gpxPolylines[m.id] = pl;
