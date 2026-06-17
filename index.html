@@ -180,15 +180,15 @@ onAuthStateChanged(fbAuth, async (user) => {
     if (typeof window.onLoginSuccess === 'function') {
       window.onLoginSuccess(userData);
     } else {
-      // 메인 script 로드 완료 후 호출
       window._pendingAuthUser = userData;
       const _wait = setInterval(() => {
-        if (typeof window.onLoginSuccess === 'function') {
+        if (typeof window.onLoginSuccess === 'function' &&
+            typeof window.currentUser !== 'undefined') {
           clearInterval(_wait);
           window.onLoginSuccess(window._pendingAuthUser);
           window._pendingAuthUser = null;
         }
-      }, 50);
+      }, 100);
     }
   } catch(e) {
     console.error('[onAuthStateChanged]', e);
@@ -2971,8 +2971,7 @@ const MAP = L.map('map', {
   attributionControl: true,
 });
 
-// 지도 타일 초기화 (저장된 스타일 적용)
-initMapTile();
+// 지도 타일은 MAP_TILES 선언 후 initMapTile()에서 초기화됨
 
 // ─── Custom SVG pin factory ──────────────────────────────────
 function makePinIcon(color, isGray=false, expired=false, catOpacity=1){
@@ -4358,6 +4357,9 @@ function initMapTile() {
   _currentTileLayer = L.tileLayer(tile.url, { attribution: tile.attr, maxZoom: 19 }).addTo(MAP);
   _updateMapStyleUI();
 }
+
+// 지도 타일 즉시 초기화 (MAP_TILES 선언 직후)
+initMapTile();
 
 function setMapStyle(style) {
   if (_currentTileLayer) MAP.removeLayer(_currentTileLayer);
