@@ -997,47 +997,47 @@ body.fp-open #chatPanel{right:260px;}
   #chatPanel{
     position:fixed !important;
     inset:0 !important;
-    width:100% !important;
-    height:100% !important;
-    max-height:100% !important;
-    border-radius:0 !important;
     z-index:1000 !important;
     background:rgba(0,0,0,0.6) !important;
-    display:flex !important;
-    align-items:flex-end !important;
-    justify-content:center !important;
     opacity:0;
     pointer-events:none;
     transition:opacity .25s ease;
     transform:none !important;
+    width:100% !important;
+    height:100% !important;
+    border-radius:0 !important;
   }
   #chatPanel.open{
     opacity:1 !important;
     pointer-events:all !important;
   }
 
-  /* chatInner: 상단 고정, 하단은 키보드 위 */
+  /* chatInner: transform 없이 position:fixed로 직접 고정 */
   #chatInner{
     position:fixed !important;
-    left:4% !important;
-    right:4% !important;
-    top:env(safe-area-inset-top, 8px) !important;
+    left:0 !important;
+    right:0 !important;
+    top:0 !important;
     bottom:0 !important;
     height:auto !important;
     max-height:none !important;
+    width:100% !important;
+    border-radius:0 !important;
     background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:16px 16px 0 0;
+    border:none;
     display:flex;
     flex-direction:column;
     overflow:hidden;
-    box-shadow:0 -8px 40px rgba(0,0,0,.5);
-    transform:translateY(110%);
-    transition:transform .3s cubic-bezier(.34,1.05,.64,1);
     z-index:1001 !important;
+    /* transform 대신 opacity로 show/hide */
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease;
+    transform:none !important;
   }
   #chatPanel.open #chatInner{
-    transform:translateY(0) !important;
+    opacity:1 !important;
+    pointer-events:all !important;
   }
   #chatPanel .cp-msgs{
     flex:1 1 0;
@@ -4931,14 +4931,10 @@ function closeChat(e) {
   const panel = document.getElementById('chatPanel');
   const inner = document.getElementById('chatInner');
   if (panel) {
-    panel.style.removeProperty('bottom');
-    panel.style.removeProperty('top');
-    panel.style.removeProperty('height');
     panel.classList.remove('open');
   }
   if (inner) {
     inner.style.removeProperty('bottom');
-    inner.style.removeProperty('top');
   }
   panel?.classList.remove('open');
   chatState.friendId   = null;
@@ -5030,22 +5026,16 @@ function scrollToBottom() {
 // 키보드가 올라오면 chatPanel을 키보드 바로 위에 고정
 (function initKeyboardHandler() {
   if (!window.visualViewport) return;
-  window.visualViewport.addEventListener('resize', () => {
+  function adjust() {
     const inner = document.getElementById('chatInner');
     const panel = document.getElementById('chatPanel');
-    if (!panel?.classList.contains('open')) return;
+    if (!inner || !panel?.classList.contains('open')) return;
     if (window.innerWidth > 768) return;
-
-    const vpH  = window.visualViewport.height;
-    const winH = window.innerHeight;
-    const kbH  = Math.max(0, winH - vpH);
-
-    // 안드로이드: chatInner bottom을 키보드 높이만큼 올림
-    if (inner) {
-      inner.style.setProperty('bottom', kbH + 'px', 'important');
-    }
+    const kbH = Math.max(0, window.innerHeight - window.visualViewport.height);
+    inner.style.setProperty('bottom', kbH + 'px', 'important');
     requestAnimationFrame(scrollToBottom);
-  });
+  }
+  window.visualViewport.addEventListener('resize', adjust);
 })();
 
 // ── 입력창 포커스 시 자동 스크롤 ────────────────────────────
