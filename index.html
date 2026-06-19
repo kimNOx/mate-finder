@@ -249,7 +249,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* ─── MAP ─────────────────────────────────── */
 #map{position:fixed;inset:0;z-index:0;}
 .leaflet-container{background:#0d1117!important;}
-.leaflet-tile-pane{filter:none;}
+.leaflet-tile-pane{filter:brightness(.48) saturate(.35) hue-rotate(190deg);}
 .leaflet-control-zoom{border:1px solid var(--border)!important;border-radius:10px!important;overflow:hidden;box-shadow:none!important;}
 .leaflet-control-zoom a{background:rgba(10,13,15,.92)!important;color:var(--text)!important;border-bottom:1px solid var(--border)!important;line-height:26px!important;}
 .leaflet-control-zoom a:hover{background:var(--s2)!important;color:var(--accent)!important;}
@@ -1843,7 +1843,7 @@ body.fp-open #chatPanel{right:260px;}
     <div class="cp-av" id="cpAv">😊</div>
     <div class="cp-name" id="cpName">—</div>
     <div class="cp-header-btns">
-      <button class="cp-invite" onclick="openInviteModal()" id="cpInviteBtn" title="초대">👥 초대</button>
+      <button class="cp-invite" onclick="openInviteModal()" id="cpInviteBtn" title="초대">👥 <span id="cpInviteLbl">초대</span></button>
       <button class="cp-leave" onclick="leaveChat(event)" id="cpLeaveBtn" title="나가기">나가기</button>
       <button class="cp-close" onclick="closeChat(event)" title="닫기">✕</button>
     </div>
@@ -1862,7 +1862,7 @@ body.fp-open #chatPanel{right:260px;}
 <div class="invite-modal-ov" id="inviteModalOv">
   <div class="invite-modal">
     <div class="invite-modal-head">
-      <span class="invite-modal-title">👥 대화 초대</span>
+      <span class="invite-modal-title" id="inviteModalTitle">👥 대화 초대</span>
       <button onclick="closeInviteModal()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;">✕</button>
     </div>
     <div class="invite-search">
@@ -1870,7 +1870,7 @@ body.fp-open #chatPanel{right:260px;}
              placeholder="닉네임 검색..."
              oninput="inviteOnInput()"
              onkeydown="if(event.key==='Enter')inviteDoSearch()">
-      <button class="invite-search-btn" onclick="inviteDoSearch()">검색</button>
+      <button class="invite-search-btn" id="inviteSearchBtn" onclick="inviteDoSearch()">검색</button>
     </div>
     <div class="invite-list" id="inviteList"></div>
     <div class="invite-footer">
@@ -2627,6 +2627,19 @@ function setLang(l){
 
   if (document.getElementById('onboardOv')?.classList.contains('on')) _updateOnboardLang();
 
+  // ── 채팅 초대 모달 ──────────────────────────────────────────
+  const cpInviteLbl      = document.getElementById('cpInviteLbl');
+  const inviteModalTitle = document.getElementById('inviteModalTitle');
+  const inviteSearchInput = document.getElementById('inviteSearchInput');
+  const inviteSearchBtn  = document.getElementById('inviteSearchBtn');
+  const inviteSubmitBtn  = document.getElementById('inviteSubmitBtn');
+  if (cpInviteLbl)       cpInviteLbl.textContent       = ko ? '초대' : 'Invite';
+  if (inviteModalTitle)  inviteModalTitle.textContent   = ko ? '👥 대화 초대' : '👥 Invite to Chat';
+  if (inviteSearchInput) inviteSearchInput.placeholder  = ko ? '닉네임 검색...' : 'Search nickname...';
+  if (inviteSearchBtn)   inviteSearchBtn.textContent    = ko ? '검색' : 'Search';
+  if (inviteSubmitBtn && !inviteSubmitBtn.disabled)
+    inviteSubmitBtn.textContent = ko ? '초대하기' : 'Invite';
+
   // FAB 버튼
   const fabLbl = document.getElementById('fabLbl');
   if (fabLbl) fabLbl.textContent = ko ? '새 모임' : 'New';
@@ -3069,7 +3082,7 @@ function handleMarkerClick(m) {
     currentSelectedId = m.id;
     const pl = gpxPolylines[m.id];
     if (pl) {
-      pl.setStyle({ color:'#FF0099', weight:6, opacity:1 });
+      pl.setStyle({ color:'#00f5a0', weight:6, opacity:1 });
       pl.bringToFront();
     }
   }
@@ -3078,7 +3091,7 @@ function handleMarkerClick(m) {
 // ── 모든 코스 기본 상태로 리셋 ──────────────────────────────
 function _resetAllPolylines() {
   Object.values(gpxPolylines).forEach(pl => {
-    pl.setStyle({ color:'#ff0000', weight:3, opacity:0.5 });
+    pl.setStyle({ color:'#ffffff', weight:3, opacity:0.4 });
   });
   currentSelectedId = null;
 }
@@ -3108,9 +3121,9 @@ function buildMarkers(){
       // Firestore는 {lat,lng} 객체, Leaflet은 [lat,lng] 배열 필요
       const latlngs = m.gpxCoords.map(c => [c.lat, c.lng]);
       const pl = L.polyline(latlngs, {
-        color:   isSelected ? '#FF0099' : '#ff0000',
+        color:   isSelected ? '#00f5a0' : '#ffffff',
         weight:  isSelected ? 6 : 3,
-        opacity: isSelected ? 1 : 0.5,
+        opacity: isSelected ? 1 : 0.4,
       }).addTo(MAP);
       pl.on('click', () => handleMarkerClick(m));
       gpxPolylines[m.id] = pl;
@@ -4910,7 +4923,11 @@ async function _checkExistingGroup(friendId) {
 function closeChat(e) {
   if (e) e.stopPropagation();
   ChatStore.stopListen();
-  document.getElementById('chatPanel').classList.remove('open');
+  const panel = document.getElementById('chatPanel');
+  const inner = document.getElementById('chatInner');
+  if (panel) { panel.style.bottom = ''; panel.style.height = ''; }
+  if (inner) { inner.style.height = ''; inner.style.maxHeight = ''; }
+  panel?.classList.remove('open');
   chatState.friendId   = null;
   chatState.friendNick = null;
   chatState.groupId    = null;
@@ -4989,24 +5006,39 @@ function scrollToBottom() {
 }
 
 // ── 모바일 키보드 대응: visualViewport resize ─────────────────
-// 키보드가 올라오면 chatInner 높이를 가시 영역 80%로 재조정
+// 키보드가 올라오면 chatPanel을 키보드 바로 위에 고정
 (function initKeyboardHandler() {
   if (!window.visualViewport) return;
-  window.visualViewport.addEventListener('resize', () => {
-    const inner = document.getElementById('chatInner');
-    if (!inner) return;
-    const isMobile = window.innerWidth <= 768;
-    const panelOpen = document.getElementById('chatPanel')?.classList.contains('open');
+
+  function onViewportChange() {
+    const panel  = document.getElementById('chatPanel');
+    const inner  = document.getElementById('chatInner');
+    if (!panel || !inner) return;
+    const isMobile  = window.innerWidth <= 768;
+    const panelOpen = panel.classList.contains('open');
     if (!isMobile || !panelOpen) return;
 
-    const visH = window.visualViewport.height;   // 키보드 제외 실제 가시 높이
-    const maxH = Math.floor(visH * 0.88);         // 가시 영역의 88%
-    inner.style.height    = maxH + 'px';
-    inner.style.maxHeight = maxH + 'px';
+    const vp       = window.visualViewport;
+    const vpH      = vp.height;       // 키보드 제외 가시 높이
+    const vpTop    = vp.offsetTop;    // 스크롤된 양
+    const winH     = window.innerHeight;
+    const kbH      = winH - vpH - vpTop;  // 키보드 높이
 
-    // 키보드 올라오면 최신 메시지로 스크롤
+    // chatPanel을 키보드 위에 고정
+    panel.style.bottom = kbH > 0 ? kbH + 'px' : '0';
+    panel.style.top    = '0';
+    panel.style.height = vpH + 'px';
+
+    // chatInner 높이 = 가시 영역 88%
+    const innerH = Math.floor(vpH * 0.88);
+    inner.style.height    = innerH + 'px';
+    inner.style.maxHeight = innerH + 'px';
+
     requestAnimationFrame(scrollToBottom);
-  });
+  }
+
+  window.visualViewport.addEventListener('resize', onViewportChange);
+  window.visualViewport.addEventListener('scroll', onViewportChange);
 })();
 
 // ── 입력창 포커스 시 자동 스크롤 ────────────────────────────
