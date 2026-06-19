@@ -1023,8 +1023,8 @@ body.fp-open #chatPanel{right:260px;}
   /* 채팅 카드: dvh 기반 — 키보드 올라와도 가시 영역 80% 초과 안 함 */
   #chatInner{
     width:92%;
-    height:80dvh;
-    max-height:80dvh;
+    height:82dvh;
+    max-height:82dvh;
     background:var(--surface);
     border:1px solid var(--border);
     border-radius:16px 16px 0 0;
@@ -1033,8 +1033,9 @@ body.fp-open #chatPanel{right:260px;}
     overflow:hidden;
     box-shadow:0 -8px 40px rgba(0,0,0,.5);
     transform:translateY(100%);
-    transition:transform .3s cubic-bezier(.34,1.05,.64,1),
-               height .15s ease, max-height .15s ease;
+    transition:transform .3s cubic-bezier(.34,1.05,.64,1);
+    /* 키보드 대응: 패널이 올라가지 않고 내부가 줄어들게 */
+    will-change:transform;
   }
   #chatPanel.open #chatInner{
     transform:translateY(0);
@@ -4931,14 +4932,28 @@ function closeChat(e) {
   ChatStore.stopListen();
   const panel = document.getElementById('chatPanel');
   const inner = document.getElementById('chatInner');
-  if (panel) { panel.style.bottom = ''; panel.style.height = ''; panel.style.top = ''; }
-  if (inner) { inner.style.height = ''; inner.style.maxHeight = ''; inner.style.marginBottom = ''; }
+  if (panel) {
+    panel.style.removeProperty('bottom');
+    panel.style.removeProperty('top');
+    panel.style.removeProperty('height');
+    panel.classList.remove('open');
+  }
+  if (inner) {
+    inner.style.removeProperty('height');
+    inner.style.removeProperty('max-height');
+    inner.style.removeProperty('margin-bottom');
+  }
   panel?.classList.remove('open');
   chatState.friendId   = null;
   chatState.friendNick = null;
   chatState.groupId    = null;
   renderFriendsList();
   popPanel();
+
+  // ✕ 버튼으로 닫으면 친구목록으로 복귀
+  if (e) {
+    setTimeout(() => toggleFriendsPanel(), 50);
+  }
 }
 
 // ── 메시지 렌더 ──────────────────────────────────────────────
@@ -5029,16 +5044,14 @@ function scrollToBottom() {
 
     const vpH  = window.visualViewport.height;
     const winH = window.innerHeight;
-    const kbH  = Math.max(0, winH - vpH);  // 키보드 높이
+    const kbH  = Math.max(0, winH - vpH);
 
-    // chatPanel은 건드리지 않음 (inset:0 유지)
-    // chatInner만 키보드 높이만큼 줄임
-    const innerH = Math.floor(vpH * 0.92);
-    inner.style.height    = innerH + 'px';
-    inner.style.maxHeight = innerH + 'px';
-    // 키보드 위 여백
-    inner.style.marginBottom = kbH > 0 ? kbH + 'px' : '0';
+    // chatPanel bottom을 키보드 높이만큼 올림 → 상단은 고정
+    panel.style.setProperty('bottom', kbH + 'px', 'important');
+    panel.style.setProperty('top', '0', 'important');
+    panel.style.setProperty('height', vpH + 'px', 'important');
 
+    // chatInner는 CSS dvh 그대로 (JS로 건드리지 않음)
     requestAnimationFrame(scrollToBottom);
   }
 
