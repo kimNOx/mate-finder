@@ -4158,8 +4158,12 @@ let _inviteSelected = new Map();  // uid → nickname
 
 function openInviteModal() {
   _inviteSelected = new Map();
-  document.getElementById('inviteSearchInput').value = '';
-  document.getElementById('inviteSubmitBtn').disabled = true;
+   document.getElementById('inviteSearchInput').value = '';
+   document.getElementById('inviteSubmitBtn').disabled = true;
+   document.getElementById('inviteSubmitBtn').textContent = lang==='ko' ? '초대하기' : 'Invite';
+   document.getElementById('inviteModalTitle').textContent = lang==='ko' ? '👥 대화 초대' : '👥 Invite to Chat';
+   document.getElementById('inviteSearchBtn').textContent = lang==='ko' ? '검색' : 'Search';
+   document.getElementById('inviteSearchInput').placeholder = lang==='ko' ? '닉네임 검색...' : 'Search nickname...';
 
   // 친구 목록으로 초기 렌더
   _renderInviteList(FriendStore._cache.filter(f => f.id !== chatState.friendId));
