@@ -3121,7 +3121,7 @@ function buildMarkers(){
       // Firestore는 {lat,lng} 객체, Leaflet은 [lat,lng] 배열 필요
       const latlngs = m.gpxCoords.map(c => [c.lat, c.lng]);
       const pl = L.polyline(latlngs, {
-        color:   isSelected ? '#00f5a0' : '#ffffff',
+        color:   isSelected ? '#00f5a0' : '#ff0000',
         weight:  isSelected ? 6 : 3,
         opacity: isSelected ? 1 : 0.4,
       }).addTo(MAP);
