@@ -995,24 +995,20 @@ body.fp-open #chatPanel{right:260px;}
 
   /* 채팅창: 모바일 전용 오버레이 방식 */
   #chatPanel{
-    /* 위치: 화면 전체를 덮는 dimmed 오버레이 */
     position:fixed !important;
-    inset:0 !important;               /* top/right/bottom/left 모두 0 */
+    inset:0 !important;
     width:100% !important;
     height:100% !important;
     max-height:100% !important;
     border-radius:0 !important;
     z-index:1000 !important;
-    background:rgba(0,0,0,0.6) !important;  /* 반투명 배경 */
+    background:rgba(0,0,0,0.6) !important;
     display:flex !important;
-    align-items:flex-end !important;        /* 카드를 하단에 */
+    align-items:flex-end !important;
     justify-content:center !important;
-    /* 숨김: opacity + pointer-events */
     opacity:0;
     pointer-events:none;
     transition:opacity .25s ease;
-    /* bottom/transform 리셋 */
-    bottom:0 !important;
     transform:none !important;
   }
   #chatPanel.open{
@@ -1020,11 +1016,15 @@ body.fp-open #chatPanel{right:260px;}
     pointer-events:all !important;
   }
 
-  /* 채팅 카드: dvh 기반 — 키보드 올라와도 가시 영역 80% 초과 안 함 */
+  /* chatInner: 상단 고정, 하단은 키보드 위 */
   #chatInner{
-    width:92%;
-    height:82dvh;
-    max-height:82dvh;
+    position:fixed !important;
+    left:4% !important;
+    right:4% !important;
+    top:env(safe-area-inset-top, 8px) !important;
+    bottom:0 !important;
+    height:auto !important;
+    max-height:none !important;
     background:var(--surface);
     border:1px solid var(--border);
     border-radius:16px 16px 0 0;
@@ -1032,15 +1032,13 @@ body.fp-open #chatPanel{right:260px;}
     flex-direction:column;
     overflow:hidden;
     box-shadow:0 -8px 40px rgba(0,0,0,.5);
-    transform:translateY(100%);
+    transform:translateY(110%);
     transition:transform .3s cubic-bezier(.34,1.05,.64,1);
-    /* 키보드 대응: 패널이 올라가지 않고 내부가 줄어들게 */
-    will-change:transform;
+    z-index:1001 !important;
   }
   #chatPanel.open #chatInner{
-    transform:translateY(0);
+    transform:translateY(0) !important;
   }
-  /* 메시지 영역: 남은 공간 모두 차지하며 내부 스크롤 */
   #chatPanel .cp-msgs{
     flex:1 1 0;
     min-height:0;
@@ -4939,9 +4937,8 @@ function closeChat(e) {
     panel.classList.remove('open');
   }
   if (inner) {
-    inner.style.removeProperty('height');
-    inner.style.removeProperty('max-height');
-    inner.style.removeProperty('margin-bottom');
+    inner.style.removeProperty('bottom');
+    inner.style.removeProperty('top');
   }
   panel?.classList.remove('open');
   chatState.friendId   = null;
@@ -5033,30 +5030,22 @@ function scrollToBottom() {
 // 키보드가 올라오면 chatPanel을 키보드 바로 위에 고정
 (function initKeyboardHandler() {
   if (!window.visualViewport) return;
-
-  function onViewportChange() {
-    const panel  = document.getElementById('chatPanel');
-    const inner  = document.getElementById('chatInner');
-    if (!panel || !inner) return;
-    const isMobile  = window.innerWidth <= 768;
-    const panelOpen = panel.classList.contains('open');
-    if (!isMobile || !panelOpen) return;
+  window.visualViewport.addEventListener('resize', () => {
+    const inner = document.getElementById('chatInner');
+    const panel = document.getElementById('chatPanel');
+    if (!panel?.classList.contains('open')) return;
+    if (window.innerWidth > 768) return;
 
     const vpH  = window.visualViewport.height;
     const winH = window.innerHeight;
     const kbH  = Math.max(0, winH - vpH);
 
-    // chatPanel bottom을 키보드 높이만큼 올림 → 상단은 고정
-    panel.style.setProperty('bottom', kbH + 'px', 'important');
-    panel.style.setProperty('top', '0', 'important');
-    panel.style.setProperty('height', vpH + 'px', 'important');
-
-    // chatInner는 CSS dvh 그대로 (JS로 건드리지 않음)
+    // 안드로이드: chatInner bottom을 키보드 높이만큼 올림
+    if (inner) {
+      inner.style.setProperty('bottom', kbH + 'px', 'important');
+    }
     requestAnimationFrame(scrollToBottom);
-  }
-
-  window.visualViewport.addEventListener('resize', onViewportChange);
-  window.visualViewport.addEventListener('scroll', onViewportChange);
+  });
 })();
 
 // ── 입력창 포커스 시 자동 스크롤 ────────────────────────────
