@@ -4931,8 +4931,8 @@ function closeChat(e) {
   ChatStore.stopListen();
   const panel = document.getElementById('chatPanel');
   const inner = document.getElementById('chatInner');
-  if (panel) { panel.style.bottom = ''; panel.style.height = ''; }
-  if (inner) { inner.style.height = ''; inner.style.maxHeight = ''; }
+  if (panel) { panel.style.bottom = ''; panel.style.height = ''; panel.style.top = ''; }
+  if (inner) { inner.style.height = ''; inner.style.maxHeight = ''; inner.style.marginBottom = ''; }
   panel?.classList.remove('open');
   chatState.friendId   = null;
   chatState.friendNick = null;
@@ -5027,21 +5027,17 @@ function scrollToBottom() {
     const panelOpen = panel.classList.contains('open');
     if (!isMobile || !panelOpen) return;
 
-    const vp       = window.visualViewport;
-    const vpH      = vp.height;       // 키보드 제외 가시 높이
-    const vpTop    = vp.offsetTop;    // 스크롤된 양
-    const winH     = window.innerHeight;
-    const kbH      = winH - vpH - vpTop;  // 키보드 높이
+    const vpH  = window.visualViewport.height;
+    const winH = window.innerHeight;
+    const kbH  = Math.max(0, winH - vpH);  // 키보드 높이
 
-    // chatPanel을 키보드 위에 고정
-    panel.style.bottom = kbH > 0 ? kbH + 'px' : '0';
-    panel.style.top    = '0';
-    panel.style.height = vpH + 'px';
-
-    // chatInner 높이 = 가시 영역 88%
-    const innerH = Math.floor(vpH * 0.88);
+    // chatPanel은 건드리지 않음 (inset:0 유지)
+    // chatInner만 키보드 높이만큼 줄임
+    const innerH = Math.floor(vpH * 0.92);
     inner.style.height    = innerH + 'px';
     inner.style.maxHeight = innerH + 'px';
+    // 키보드 위 여백
+    inner.style.marginBottom = kbH > 0 ? kbH + 'px' : '0';
 
     requestAnimationFrame(scrollToBottom);
   }
