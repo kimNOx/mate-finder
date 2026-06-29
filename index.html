@@ -1318,7 +1318,53 @@ body.fp-open #chatPanel{right:260px;}
 .cp-send-btn:hover{opacity:.85;}
 
 /* ─── ADD FRIEND from meeting sheet ─────── */
-.meeting-attendees{
+/* ─── 댓글 섹션 ─────────────────────────── */
+.comments-section{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid var(--border);
+}
+.comments-title{
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+  letter-spacing:1.2px;margin-bottom:10px;
+}
+.comment-input-row{
+  display:flex;gap:8px;margin-bottom:12px;
+}
+.comment-input{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:8px 12px;
+  font-family:var(--sans);font-size:12px;color:var(--text);
+  outline:none;resize:none;height:38px;line-height:1.4;
+}
+.comment-input:focus{border-color:var(--a2);}
+.comment-submit-btn{
+  padding:8px 14px;border-radius:10px;
+  background:var(--accent);color:#000;
+  font-family:var(--mono);font-size:11px;font-weight:800;
+  border:none;cursor:pointer;white-space:nowrap;
+  transition:opacity .18s;flex-shrink:0;
+}
+.comment-submit-btn:hover{opacity:.85;}
+.comment-list{display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.comment-item{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:10px 12px;
+}
+.comment-item.is-host{
+  background:rgba(0,245,160,.06);
+  border-color:rgba(0,245,160,.25);
+}
+.comment-header{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.comment-author{font-family:var(--mono);font-size:11px;font-weight:700;}
+.comment-host-badge{
+  font-family:var(--mono);font-size:8px;font-weight:800;
+  background:var(--accent);color:#000;
+  padding:1px 5px;border-radius:4px;
+}
+.comment-time{font-family:var(--mono);font-size:9px;color:var(--muted);margin-left:auto;}
+.comment-content{font-size:12px;line-height:1.5;color:var(--text);}
+.comment-empty{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:12px 0;}
   margin-top:10px;padding:10px 14px;
   background:var(--s2);border:1px solid var(--border);border-radius:10px;
 }
@@ -2199,6 +2245,18 @@ body.fp-open #chatPanel{right:260px;}
       <div class="meeting-attendees" id="meetingAttendees" style="display:none">
         <div class="ma-title" id="maTitle">PARTICIPANTS — 친구로 추가</div>
         <div class="ma-list" id="maList"></div>
+      </div>
+
+      <!-- 댓글 섹션 -->
+      <div class="comments-section" id="commentsSection" style="display:none">
+        <div class="comments-title" id="commentsTitleLbl">💬 COMMENTS</div>
+        <div class="comment-input-row">
+          <input class="comment-input" id="commentInput"
+                 placeholder="댓글을 입력하세요..."
+                 onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addComment();}">
+          <button class="comment-submit-btn" id="commentSubmitBtn" onclick="addComment()">등록</button>
+        </div>
+        <div class="comment-list" id="commentList"></div>
       </div>
     </div>
   </div>
@@ -3176,6 +3234,8 @@ function openBS(m){
   const legend = document.getElementById('legendPanel');
   if (legend && window.innerWidth < 768) legend.style.display = 'none';
   pushPanel('bs');
+  // 댓글 로드
+  loadComments(m.id);
 }
 function closeBS(){
   document.getElementById('bsBack').classList.remove('on');
@@ -3184,6 +3244,7 @@ function closeBS(){
   const legend = document.getElementById('legendPanel');
   if (legend) legend.style.display = '';
   currentMeeting=null;
+  stopComments();
   popPanel();
 }
 
@@ -4151,7 +4212,102 @@ function fbValidate() {
 //  FRIEND STORE  — localStorage 기반
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-//  그룹 채팅 초대 모달
+//  댓글 시스템
+// ═══════════════════════════════════════════════════════════════
+let _commentsUnsub = null;
+
+function loadComments(meetingId) {
+  // 기존 리스너 해제
+  if (_commentsUnsub) { _commentsUnsub(); _commentsUnsub = null; }
+
+  const section = document.getElementById('commentsSection');
+  const list    = document.getElementById('commentList');
+  if (!section || !list) return;
+  section.style.display = 'block';
+
+  // i18n
+  const ko = lang === 'ko';
+  document.getElementById('commentsTitleLbl').textContent = ko ? '💬 댓글' : '💬 Comments';
+  document.getElementById('commentInput').placeholder     = ko ? '댓글을 입력하세요...' : 'Write a comment...';
+  document.getElementById('commentSubmitBtn').textContent = ko ? '등록' : 'Post';
+
+  list.innerHTML = `<div class="comment-empty">${ko?'불러오는 중...':'Loading...'}</div>`;
+
+  const { collection, query, orderBy, onSnapshot } = window._fb;
+  const q = query(
+    collection(window._fbDb, 'meetings', meetingId, 'comments'),
+    orderBy('timestamp', 'asc')
+  );
+
+  _commentsUnsub = onSnapshot(q, snap => {
+    if (snap.empty) {
+      list.innerHTML = `<div class="comment-empty">${ko?'아직 댓글이 없어요. 첫 댓글을 남겨보세요!':'No comments yet. Be the first!'}</div>`;
+      return;
+    }
+    const hostId = currentMeeting?.host?.id;
+    list.innerHTML = snap.docs.map(d => {
+      const data     = d.data();
+      const isHost   = data.userId === hostId;
+      const t        = data.timestamp?.toDate?.() ?? new Date();
+      const timeStr  = `${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+      const badge    = isHost ? `<span class="comment-host-badge">${ko?'작성자':'HOST'}</span>` : '';
+      return `<div class="comment-item ${isHost?'is-host':''}">
+        <div class="comment-header">
+          <span class="comment-author">${data.userName}</span>
+          ${badge}
+          <span class="comment-time">${timeStr}</span>
+        </div>
+        <div class="comment-content">${data.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      </div>`;
+    }).join('');
+    // 최신 댓글로 스크롤
+    list.scrollTop = list.scrollHeight;
+  }, err => {
+    console.error('[comments]', err);
+    list.innerHTML = `<div class="comment-empty">${ko?'댓글을 불러오지 못했습니다.':'Failed to load comments.'}</div>`;
+  });
+}
+
+async function addComment() {
+  if (!currentUser) {
+    alert(lang==='ko'?'로그인 후 댓글을 남길 수 있습니다.':'Please log in to comment.');
+    return;
+  }
+  if (!currentMeeting) return;
+
+  const input   = document.getElementById('commentInput');
+  const content = input.value.trim();
+  if (!content) return;
+
+  const btn = document.getElementById('commentSubmitBtn');
+  btn.disabled = true;
+
+  try {
+    const { collection, addDoc, serverTimestamp } = window._fb;
+    await addDoc(
+      collection(window._fbDb, 'meetings', currentMeeting.id, 'comments'),
+      {
+        userId:    currentUser.id,
+        userName:  currentUser.nickname,
+        content,
+        timestamp: serverTimestamp(),
+      }
+    );
+    input.value = '';
+  } catch(e) {
+    console.error('[addComment]', e);
+    showToast('A', lang==='ko'?'댓글 등록 실패':'Failed to post comment');
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+}
+
+function stopComments() {
+  if (_commentsUnsub) { _commentsUnsub(); _commentsUnsub = null; }
+  const section = document.getElementById('commentsSection');
+  if (section) section.style.display = 'none';
+}
 // ═══════════════════════════════════════════════════════════════
 let _inviteSelected = new Map();  // uid → nickname
 
