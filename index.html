@@ -1318,7 +1318,51 @@ body.fp-open #chatPanel{right:260px;}
 .cp-send-btn:hover{opacity:.85;}
 
 /* ─── ADD FRIEND from meeting sheet ─────── */
-/* ─── 댓글 섹션 ─────────────────────────── */
+/* ─── 댓글 액션 버튼 ────────────────────── */
+.comment-actions{
+  display:flex;gap:6px;margin-top:6px;
+}
+.comment-action-btn{
+  font-family:var(--mono);font-size:9px;font-weight:700;
+  padding:3px 8px;border-radius:6px;border:1px solid var(--border);
+  background:none;color:var(--muted);cursor:pointer;transition:all .15s;
+}
+.comment-action-btn:hover{border-color:var(--a2);color:var(--a2);}
+.comment-action-btn.danger:hover{border-color:#ff4d6d;color:#ff4d6d;}
+
+/* ─── 대댓글 ─────────────────────────────── */
+.comment-item.is-reply{
+  margin-left:20px;
+  border-left:2px solid var(--border);
+  border-radius:0 10px 10px 0;
+}
+.comment-reply-to{
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+  margin-bottom:4px;
+}
+
+/* ─── 댓글 수정 인라인 ───────────────────── */
+.comment-edit-row{
+  display:flex;gap:6px;margin-top:6px;
+}
+.comment-edit-input{
+  flex:1;background:var(--bg);border:1px solid var(--a2);
+  border-radius:8px;padding:6px 10px;
+  font-family:var(--sans);font-size:12px;color:var(--text);
+  outline:none;
+}
+.comment-edit-save{
+  padding:6px 12px;border-radius:8px;
+  background:var(--accent);color:#000;
+  font-family:var(--mono);font-size:10px;font-weight:800;
+  border:none;cursor:pointer;
+}
+.comment-edit-cancel{
+  padding:6px 10px;border-radius:8px;
+  background:var(--s2);color:var(--muted);
+  font-family:var(--mono);font-size:10px;
+  border:1px solid var(--border);cursor:pointer;
+}
 .comments-section{
   margin-top:14px;
   padding-top:14px;
@@ -2250,6 +2294,11 @@ body.fp-open #chatPanel{right:260px;}
       <!-- 댓글 섹션 -->
       <div class="comments-section" id="commentsSection" style="display:none">
         <div class="comments-title" id="commentsTitleLbl">💬 COMMENTS</div>
+        <!-- 대댓글 입력 표시 영역 -->
+        <div id="replyTarget" style="display:none;padding:6px 10px;background:var(--s2);border-radius:8px;margin-bottom:8px;font-family:var(--mono);font-size:10px;color:var(--muted);">
+          <span id="replyTargetTxt"></span>
+          <button onclick="cancelReply()" style="float:right;background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;">✕</button>
+        </div>
         <div class="comment-input-row">
           <input class="comment-input" id="commentInput"
                  placeholder="댓글을 입력하세요..."
@@ -4214,58 +4263,84 @@ function fbValidate() {
 // ═══════════════════════════════════════════════════════════════
 //  댓글 시스템
 // ═══════════════════════════════════════════════════════════════
-let _commentsUnsub = null;
+let _commentsUnsub  = null;
+let _commentTarget  = null;  // 옵션 팝업용 현재 선택 댓글
+let _replyTo        = null;  // 대댓글 대상 { id, userName }
+let _editingId      = null;  // 수정 중인 댓글 ID
+let _commentsCache  = [];    // 전체 댓글 캐시
 
 function loadComments(meetingId) {
-  // 기존 리스너 해제
   if (_commentsUnsub) { _commentsUnsub(); _commentsUnsub = null; }
-
   const section = document.getElementById('commentsSection');
   const list    = document.getElementById('commentList');
   if (!section || !list) return;
   section.style.display = 'block';
-
-  // i18n
-  const ko = lang === 'ko';
-  document.getElementById('commentsTitleLbl').textContent = ko ? '💬 댓글' : '💬 Comments';
-  document.getElementById('commentInput').placeholder     = ko ? '댓글을 입력하세요...' : 'Write a comment...';
-  document.getElementById('commentSubmitBtn').textContent = ko ? '등록' : 'Post';
-
-  list.innerHTML = `<div class="comment-empty">${ko?'불러오는 중...':'Loading...'}</div>`;
+  _applyCommentLang();
+  list.innerHTML = `<div class="comment-empty">${lang==='ko'?'불러오는 중...':'Loading...'}</div>`;
 
   const { collection, query, orderBy, onSnapshot } = window._fb;
   const q = query(
     collection(window._fbDb, 'meetings', meetingId, 'comments'),
     orderBy('timestamp', 'asc')
   );
-
   _commentsUnsub = onSnapshot(q, snap => {
-    if (snap.empty) {
-      list.innerHTML = `<div class="comment-empty">${ko?'아직 댓글이 없어요. 첫 댓글을 남겨보세요!':'No comments yet. Be the first!'}</div>`;
-      return;
-    }
-    const hostId = currentMeeting?.host?.id;
-    list.innerHTML = snap.docs.map(d => {
-      const data     = d.data();
-      const isHost   = data.userId === hostId;
-      const t        = data.timestamp?.toDate?.() ?? new Date();
-      const timeStr  = `${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
-      const badge    = isHost ? `<span class="comment-host-badge">${ko?'작성자':'HOST'}</span>` : '';
-      return `<div class="comment-item ${isHost?'is-host':''}">
-        <div class="comment-header">
-          <span class="comment-author">${data.userName}</span>
-          ${badge}
-          <span class="comment-time">${timeStr}</span>
-        </div>
-        <div class="comment-content">${data.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-      </div>`;
-    }).join('');
-    // 최신 댓글로 스크롤
-    list.scrollTop = list.scrollHeight;
+    _commentsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _renderComments();
   }, err => {
     console.error('[comments]', err);
-    list.innerHTML = `<div class="comment-empty">${ko?'댓글을 불러오지 못했습니다.':'Failed to load comments.'}</div>`;
+    list.innerHTML = `<div class="comment-empty">${lang==='ko'?'불러오지 못했습니다.':'Failed to load.'}</div>`;
   });
+}
+
+function _renderComments() {
+  const list   = document.getElementById('commentList');
+  const ko     = lang === 'ko';
+  const hostId = currentMeeting?.host?.id;
+  if (!list) return;
+
+  if (!_commentsCache.length) {
+    list.innerHTML = `<div class="comment-empty">${ko?'첫 댓글을 남겨보세요!':'Be the first to comment!'}</div>`;
+    return;
+  }
+
+  // 부모 댓글 → 자식(대댓글) 순으로 그룹화
+  const parents  = _commentsCache.filter(c => !c.parentId);
+  const children = _commentsCache.filter(c =>  c.parentId);
+
+  function renderItem(c, isReply) {
+    const isHost   = c.userId === hostId;
+    const isOwn    = c.userId === currentUser?.id;
+    const ko       = lang === 'ko';
+    const t        = c.timestamp?.toDate?.() ?? new Date();
+    const timeStr  = `${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+    const badge    = isHost ? `<span class="comment-host-badge">${ko?'작성자':'HOST'}</span>` : '';
+    const replyTag = isReply && c.parentId
+      ? `<div class="comment-reply-to">↩ ${_commentsCache.find(x=>x.id===c.parentId)?.userName ?? ''}</div>`
+      : '';
+
+    // 버튼: 내 댓글 → 대댓글+수정+삭제 / 남의 댓글 → 대댓글만
+    const replyBtn  = `<button class="comment-action-btn" onclick="setReply('${c.id}')">${ko?'↩ 대댓글':'↩ Reply'}</button>`;
+    const editBtn   = isOwn ? `<button class="comment-action-btn" onclick="startEdit('${c.id}')">${ko?'✏️ 수정':'✏️ Edit'}</button>` : '';
+    const deleteBtn = isOwn ? `<button class="comment-action-btn danger" onclick="deleteComment('${c.id}')">${ko?'🗑️ 삭제':'🗑️ Delete'}</button>` : '';
+
+    return `<div class="comment-item ${isHost?'is-host':''} ${isReply?'is-reply':''}" id="ci_${c.id}">
+      ${replyTag}
+      <div class="comment-header">
+        <span class="comment-author">${c.userName}</span>
+        ${badge}
+        <span class="comment-time">${timeStr}</span>
+      </div>
+      <div class="comment-content" id="cc_${c.id}">${c.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      <div class="comment-actions">${replyBtn}${editBtn}${deleteBtn}</div>
+    </div>`;
+  }
+
+  list.innerHTML = parents.map(p => {
+    const replies = children.filter(c => c.parentId === p.id);
+    return renderItem(p, false) + replies.map(r => renderItem(r, true)).join('');
+  }).join('');
+
+  list.scrollTop = list.scrollHeight;
 }
 
 async function addComment() {
@@ -4274,39 +4349,119 @@ async function addComment() {
     return;
   }
   if (!currentMeeting) return;
-
   const input   = document.getElementById('commentInput');
   const content = input.value.trim();
   if (!content) return;
-
   const btn = document.getElementById('commentSubmitBtn');
   btn.disabled = true;
-
   try {
     const { collection, addDoc, serverTimestamp } = window._fb;
-    await addDoc(
-      collection(window._fbDb, 'meetings', currentMeeting.id, 'comments'),
-      {
-        userId:    currentUser.id,
-        userName:  currentUser.nickname,
-        content,
-        timestamp: serverTimestamp(),
-      }
-    );
+    const data = {
+      userId:    currentUser.id,
+      userName:  currentUser.nickname,
+      content,
+      timestamp: serverTimestamp(),
+    };
+    if (_replyTo) data.parentId = _replyTo.id;
+    await addDoc(collection(window._fbDb, 'meetings', currentMeeting.id, 'comments'), data);
     input.value = '';
+    cancelReply();
   } catch(e) {
     console.error('[addComment]', e);
-    showToast('A', lang==='ko'?'댓글 등록 실패':'Failed to post comment');
+    showToast('A', lang==='ko'?'댓글 등록 실패':'Failed to post');
   } finally {
     btn.disabled = false;
     input.focus();
   }
 }
 
+// ── 대댓글 ───────────────────────────────────────────────────
+function setReply(commentId) {
+  const c = _commentsCache.find(x => x.id === commentId);
+  if (!c) return;
+  _replyTo = { id: commentId, userName: c.userName };
+  const ko = lang === 'ko';
+  document.getElementById('replyTarget').style.display = 'block';
+  document.getElementById('replyTargetTxt').textContent =
+    `${ko?'답글 대상:':'Replying to:'} @${c.userName}`;
+  document.getElementById('commentInput').focus();
+}
+
+function cancelReply() {
+  _replyTo = null;
+  document.getElementById('replyTarget').style.display = 'none';
+  document.getElementById('replyTargetTxt').textContent = '';
+}
+
+// ── 수정 ─────────────────────────────────────────────────────
+function startEdit(commentId) {
+  const c = _commentsCache.find(x => x.id === commentId);
+  if (!c) return;
+  _editingId = commentId;
+  const el = document.getElementById(`cc_${commentId}`);
+  if (!el) return;
+  const ko = lang === 'ko';
+  el.innerHTML = `
+    <div class="comment-edit-row">
+      <input class="comment-edit-input" id="editInput_${commentId}" value="${c.content.replace(/"/g,'&quot;')}"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();saveEdit('${commentId}');}">
+      <button class="comment-edit-save" onclick="saveEdit('${commentId}')">${ko?'저장':'Save'}</button>
+      <button class="comment-edit-cancel" onclick="cancelEdit('${commentId}')">${ko?'취소':'Cancel'}</button>
+    </div>`;
+  document.getElementById(`editInput_${commentId}`)?.focus();
+}
+
+async function saveEdit(commentId) {
+  const input = document.getElementById(`editInput_${commentId}`);
+  const content = input?.value.trim();
+  if (!content) return;
+  try {
+    const { doc, updateDoc } = window._fb;
+    await updateDoc(doc(window._fbDb, 'meetings', currentMeeting.id, 'comments', commentId), { content });
+    _editingId = null;
+  } catch(e) {
+    console.error('[saveEdit]', e);
+    showToast('A', lang==='ko'?'수정 실패':'Edit failed');
+  }
+}
+
+function cancelEdit(commentId) {
+  _editingId = null;
+  _renderComments();
+}
+
+// ── 삭제 ─────────────────────────────────────────────────────
+async function deleteComment(commentId) {
+  const ko = lang === 'ko';
+  if (!confirm(ko?'댓글을 삭제하시겠어요?':'Delete this comment?')) return;
+  try {
+    const { doc, deleteDoc } = window._fb;
+    await deleteDoc(doc(window._fbDb, 'meetings', currentMeeting.id, 'comments', commentId));
+    showToast('B', ko?'삭제됐습니다':'Deleted');
+  } catch(e) {
+    console.error('[deleteComment]', e);
+    showToast('A', ko?'삭제 실패':'Delete failed');
+  }
+}
+
+function _applyCommentLang() {
+  const ko = lang === 'ko';
+  const el = document.getElementById('commentsTitleLbl');
+  const inp = document.getElementById('commentInput');
+  const btn = document.getElementById('commentSubmitBtn');
+  if (el)  el.textContent  = ko ? '💬 댓글' : '💬 Comments';
+  if (inp) inp.placeholder = ko ? '댓글을 입력하세요...' : 'Write a comment...';
+  if (btn) btn.textContent = ko ? '등록' : 'Post';
+}
+
 function stopComments() {
   if (_commentsUnsub) { _commentsUnsub(); _commentsUnsub = null; }
   const section = document.getElementById('commentsSection');
   if (section) section.style.display = 'none';
+  _commentsCache = [];
+  _replyTo = null;
+  _editingId = null;
+  cancelReply();
 }
 // ═══════════════════════════════════════════════════════════════
 let _inviteSelected = new Map();  // uid → nickname
