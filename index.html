@@ -684,6 +684,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
    데스크톱 (≥769px): 단일행 헤더
    ════════════════════════════════ */
 @media (min-width: 769px) {
+  /* 데스크톱: 바텀시트 절반 너비, 우측 고정 */
+  .bs {
+    left: auto;
+    right: 0;
+    width: 50vw;
+   }
   /* mobile-header를 데스크톱 HUD로 사용 */
   .mobile-header{
     position:fixed;top:0;left:0;right:0;z-index:500;
