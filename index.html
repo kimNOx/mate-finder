@@ -388,13 +388,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* course */
 .course-card{background:var(--s2);border:1px solid var(--border);border-radius:11px;padding:13px;margin-bottom:13px;}
 .course-title{font-size:13px;font-weight:700;margin-bottom:5px;font-family:var(--sans),-apple-system,sans-serif;}
-.course-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--text);margin-bottom:7px;}
-.course-route{font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.55;}
+.course-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:7px;}
+.course-route{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.55;}
 .participants-bar{margin-top:8px;}
-.pb-lbl{font-family:var(--mono);font-size:10px;color:var(--text);margin-bottom:4px;}
+.pb-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:4px;}
 .pb-track{background:var(--border);border-radius:4px;height:5px;overflow:hidden;}
 .pb-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--a2));transition:width .3s;}
-.pb-count{font-family:var(--mono);font-size:11px;color:var(--text);margin-top:3px;}
+.pb-count{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;}
 
 /* diff badge */
 .diff-badge{display:flex;align-items:center;gap:11px;padding:11px 14px;
@@ -684,12 +684,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
    데스크톱 (≥769px): 단일행 헤더
    ════════════════════════════════ */
 @media (min-width: 769px) {
-  /* 데스크톱: 바텀시트 절반 너비, 우측 고정 */
-  .bs {
-    left: auto;
-    right: 0;
-    width: 50vw;
-   }
   /* mobile-header를 데스크톱 HUD로 사용 */
   .mobile-header{
     position:fixed;top:0;left:0;right:0;z-index:500;
@@ -2392,14 +2386,14 @@ body.fp-open #chatPanel{right:260px;}
       <textarea id="fRoute" placeholder="출발지 → 경유지 → 도착지"></textarea>
     </div>
     <div class="field">
-      <div class="field-lbl" id="fAttachLbl">📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span></div>
+      <div class="field-lbl" id="fAttachLbl">📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · TCX · 사진, 선택)</span></div>
       <div class="attach-drop" id="attachDrop"
            ondragover="event.preventDefault();this.classList.add('drag')"
            ondragleave="this.classList.remove('drag')"
            ondrop="handleAttachDrop(event)">
         <span class="attach-drop-icon">📂</span>
         <span id="attachDropTxt">여기에 파일을 끌어다 놓거나 클릭하여 선택</span>
-        <input type="file" id="fAttach" multiple accept=".gpx,.jpg,.jpeg,.png,.webp"
+        <input type="file" id="fAttach" multiple accept=".gpx,.tcx,.jpg,.jpeg,.png,.webp"
                style="position:absolute;inset:0;opacity:0;cursor:pointer"
                onchange="handleAttachSelect(this.files)">
       </div>
@@ -2765,8 +2759,8 @@ function setLang(l){
 
   const fAttachLbl = document.getElementById('fAttachLbl');
   if (fAttachLbl) fAttachLbl.innerHTML = ko
-    ? '📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span>'
-    : '📎 Attachment <span style="color:var(--muted);font-size:9px;">(GPX · Photo, optional)</span>';
+    ? '📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · TCX · 사진, 선택)</span>'
+    : '📎 Attachment <span style="color:var(--muted);font-size:9px;">(GPX · TCX · Photo, optional)</span>';
 
   const attachDropTxt = document.getElementById('attachDropTxt');
   if (attachDropTxt) attachDropTxt.textContent = ko
@@ -3172,6 +3166,35 @@ function parseGpx(xmlStr) {
     });
     return coords;
   } catch(e) { return []; }
+}
+
+// ── TCX (Garmin Training Center XML) 파싱 ───────────────────
+// 구조: <Trackpoint><Position><LatitudeDegrees>/<LongitudeDegrees>
+function parseTcx(xmlStr) {
+  try {
+    const parser = new DOMParser();
+    const xml    = parser.parseFromString(xmlStr, 'text/xml');
+    const pts    = xml.querySelectorAll('Trackpoint');
+    const coords = [];
+    pts.forEach(pt => {
+      const posEl = pt.querySelector('Position');
+      if (!posEl) return;
+      const latEl = posEl.querySelector('LatitudeDegrees');
+      const lonEl = posEl.querySelector('LongitudeDegrees');
+      if (!latEl || !lonEl) return;
+      const lat = parseFloat(latEl.textContent);
+      const lon = parseFloat(lonEl.textContent);
+      if (isFinite(lat) && isFinite(lon)) coords.push({ lat, lng: lon });
+    });
+    return coords;
+  } catch(e) { return []; }
+}
+
+// ── 파일 확장자에 따라 GPX/TCX 자동 분기 ──────────────────────
+function parseRouteFile(text, filename) {
+  const ext = filename.toLowerCase().split('.').pop();
+  if (ext === 'tcx') return parseTcx(text);
+  return parseGpx(text);  // 기본값: gpx
 }
 
 // ── 마커/코스 클릭 분기 로직 ────────────────────────────────
@@ -4025,13 +4048,16 @@ async function submitCreate() {
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
-  // GPX 파일 파싱 → 좌표 배열 추출 (최대 5000포인트)
+  // GPX/TCX 파일 파싱 → 좌표 배열 추출 (최대 5000포인트)
   let gpxCoords = [];
-  const gpxFile = _attachFiles.find(a => a.file.name.toLowerCase().endsWith('.gpx'));
-  if (gpxFile) {
+  const routeFile = _attachFiles.find(a => {
+    const n = a.file.name.toLowerCase();
+    return n.endsWith('.gpx') || n.endsWith('.tcx');
+  });
+  if (routeFile) {
     try {
-      const gpxText = await gpxFile.file.text();
-      const raw     = parseGpx(gpxText);
+      const routeText = await routeFile.file.text();
+      const raw        = parseRouteFile(routeText, routeFile.file.name);
       // 포인트가 많으면 균등 샘플링
       if (raw.length > 5000) {
         const step = Math.ceil(raw.length / 5000);
@@ -4039,7 +4065,7 @@ async function submitCreate() {
       } else {
         gpxCoords  = raw;
       }
-    } catch(e) { console.warn('[GPX parse]', e); }
+    } catch(e) { console.warn('[Route file parse]', e); }
   }
 
   try {
@@ -5545,8 +5571,9 @@ function _renderAttachList() {
   if (!el) return;
   if (!_attachFiles.length) { el.innerHTML = ''; return; }
   el.innerHTML = _attachFiles.map(({file, id}) => {
-    const isGpx  = file.name.toLowerCase().endsWith('.gpx');
-    const icon   = isGpx ? '🗺️' : '🖼️';
+    const n      = file.name.toLowerCase();
+    const isRoute = n.endsWith('.gpx') || n.endsWith('.tcx');
+    const icon   = isRoute ? '🗺️' : '🖼️';
     const size   = file.size < 1024*1024
       ? `${(file.size/1024).toFixed(0)}KB`
       : `${(file.size/1024/1024).toFixed(1)}MB`;
