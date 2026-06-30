@@ -388,13 +388,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* course */
 .course-card{background:var(--s2);border:1px solid var(--border);border-radius:11px;padding:13px;margin-bottom:13px;}
 .course-title{font-size:13px;font-weight:700;margin-bottom:5px;font-family:var(--sans),-apple-system,sans-serif;}
-.course-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:7px;}
-.course-route{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.55;}
+.course-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--text);margin-bottom:7px;}
+.course-route{font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.55;}
 .participants-bar{margin-top:8px;}
-.pb-lbl{font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:4px;}
+.pb-lbl{font-family:var(--mono);font-size:10px;color:var(--text);margin-bottom:4px;}
 .pb-track{background:var(--border);border-radius:4px;height:5px;overflow:hidden;}
 .pb-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--a2));transition:width .3s;}
-.pb-count{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;}
+.pb-count{font-family:var(--mono);font-size:11px;color:var(--text);margin-top:3px;}
 
 /* diff badge */
 .diff-badge{display:flex;align-items:center;gap:11px;padding:11px 14px;
@@ -684,6 +684,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
    데스크톱 (≥769px): 단일행 헤더
    ════════════════════════════════ */
 @media (min-width: 769px) {
+  /* 데스크톱: 바텀시트 절반 너비, 우측 고정 */
+  .bs {
+    left: auto;
+    right: 0;
+    width: 50vw;
+   }
   /* mobile-header를 데스크톱 HUD로 사용 */
   .mobile-header{
     position:fixed;top:0;left:0;right:0;z-index:500;
