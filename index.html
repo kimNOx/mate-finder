@@ -1506,6 +1506,16 @@ body.fp-open #chatPanel{right:260px;}
   transition:background .15s;
 }
 .settings-cancel:hover{background:var(--border);}
+.settings-theme-btn{
+  flex:1;padding:10px;border-radius:10px;
+  background:var(--s2);border:2px solid var(--border);
+  font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--muted);cursor:pointer;transition:all .15s;
+}
+.settings-theme-btn.active{
+  border-color:var(--accent);color:var(--accent);
+  background:rgba(0,245,160,.08);
+}
 
 /* ─── 회원탈퇴 확인 모달 ───────────────── */
 .withdraw-ov{
@@ -2194,6 +2204,22 @@ body.fp-open #chatPanel{right:260px;}
 <div class="settings-ov" id="settingsOv">
   <div class="settings-modal">
     <div class="settings-title">⚙️ <span id="settingsTitleLbl">설정</span></div>
+
+    <!-- 지도 테마 -->
+    <div style="padding:4px 0 8px;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px;padding:0 4px;" id="settingsMapThemeLbl">🗺️ 지도 테마</div>
+      <div style="display:flex;gap:8px;padding:0 4px;">
+        <button class="settings-theme-btn" id="themeLight" onclick="setMapTheme('light')">
+          ☀️ <span id="themeLightLbl">기본</span>
+        </button>
+        <button class="settings-theme-btn" id="themeDark" onclick="setMapTheme('dark')">
+          🌑 <span id="themeDarkLbl">다크</span>
+        </button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:4px 0;"></div>
+
     <button class="settings-item danger" onclick="openWithdraw()">
       <span class="settings-item-icon">🚪</span>
       <span id="settingsWithdrawLbl">회원탈퇴</span>
@@ -3180,11 +3206,39 @@ const MAP = L.map('map', {
   attributionControl: true,
 });
 
-// 지도 타일 — OpenStreetMap Mapnik (기본)
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  maxZoom: 19,
-}).addTo(MAP);
+// 지도 타일 — 테마 시스템
+const MAP_THEMES = {
+  light: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    filter: 'none',
+  },
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    filter: 'none',
+  },
+};
+
+let _tileLayer   = null;
+let _mapTheme    = localStorage.getItem('mf_map_theme') || 'light';
+
+function _applyMapTheme(theme) {
+  if (_tileLayer) MAP.removeLayer(_tileLayer);
+  const t = MAP_THEMES[theme] || MAP_THEMES.light;
+  _tileLayer = L.tileLayer(t.url, { attribution: t.attr, maxZoom: 19 }).addTo(MAP);
+  document.querySelector('.leaflet-tile-pane').style.filter = t.filter;
+  _mapTheme = theme;
+  localStorage.setItem('mf_map_theme', theme);
+  // 버튼 UI 업데이트
+  document.getElementById('themeLight')?.classList.toggle('active', theme === 'light');
+  document.getElementById('themeDark')?.classList.toggle('active', theme === 'dark');
+}
+
+function setMapTheme(theme) { _applyMapTheme(theme); }
+
+// 초기 적용
+_applyMapTheme(_mapTheme);
 
 // ─── Custom SVG pin factory ──────────────────────────────────
 function makePinIcon(color, isGray=false, expired=false, catOpacity=1){
@@ -4767,8 +4821,14 @@ function openSettings(e) {
   if (e) e.stopPropagation();
   const ko = lang === 'ko';
   document.getElementById('settingsTitleLbl').textContent    = ko ? '설정' : 'Settings';
+  document.getElementById('settingsMapThemeLbl').textContent = ko ? '🗺️ 지도 테마' : '🗺️ Map Theme';
+  document.getElementById('themeLightLbl').textContent       = ko ? '기본' : 'Default';
+  document.getElementById('themeDarkLbl').textContent        = ko ? '다크' : 'Dark';
   document.getElementById('settingsWithdrawLbl').textContent = ko ? '회원탈퇴' : 'Delete Account';
   document.getElementById('settingsCancelBtn').textContent   = ko ? '닫기' : 'Close';
+  // 현재 테마 버튼 활성화
+  document.getElementById('themeLight').classList.toggle('active', _mapTheme === 'light');
+  document.getElementById('themeDark').classList.toggle('active',  _mapTheme === 'dark');
   document.getElementById('settingsOv').classList.add('on');
   pushPanel('settings');
 }
@@ -4779,6 +4839,7 @@ function closeSettings() {
 }
 
 function openWithdraw() {
+  // closeSettings() 호출 금지 — popPanel 충돌로 withdrawOv가 즉시 닫힘
   document.getElementById('settingsOv').classList.remove('on');
   const ko = lang === 'ko';
   document.getElementById('withdrawTitle').textContent       = ko ? '정말 탈퇴하시겠어요?' : 'Delete your account?';
