@@ -1458,28 +1458,6 @@ body.fp-open #chatPanel{right:260px;}
 .ma-chip-av{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,var(--a2),var(--accent));
   display:flex;align-items:center;justify-content:center;font-size:9px;}
 
-/* ─── 마커 박동 애니메이션 ────────────────── */
-@keyframes pulse-fast{
-  0%,100%{transform:scale(1);}
-  50%{transform:scale(1.25);}
-}
-@keyframes pulse-slow{
-  0%,100%{transform:scale(1);}
-  50%{transform:scale(1.12);}
-}
-.leaflet-marker-icon.pulse-fast{
-  animation:pulse-fast 1.0s ease-in-out infinite;
-  transform-origin:50% 100%;
-}
-.leaflet-marker-icon.pulse-slow{
-  animation:pulse-slow 2.5s ease-in-out infinite;
-  transform-origin:50% 100%;
-}
-.leaflet-marker-icon.mf-dimmed{
-  opacity:0.3 !important;
-  transition:opacity .3s;
-}
-
 /* ─── 설정 버튼 ─────────────────────────── */
 .settings-btn{
   background:none;border:none;
@@ -2176,10 +2154,6 @@ body.fp-open #chatPanel{right:260px;}
     <button class="rb-btn on" data-km="10"   onclick="setRadius(10)">10km</button>
     <button class="rb-btn"    data-km="30"   onclick="setRadius(30)">30km</button>
     <button class="rb-btn"    data-km="0"    onclick="setRadius(0)" id="rbAllBtn">전체</button>
-    <div class="rb-divider"></div>
-    <button class="rb-btn" id="tfToday" onclick="setTimeFilter('today')">오늘</button>
-    <button class="rb-btn" id="tfWeek"  onclick="setTimeFilter('week')">이번주</button>
-    <button class="rb-btn on" id="tfAll" onclick="setTimeFilter('all')">전체</button>
     <div class="rb-divider"></div>
     <select class="cat-select" id="catSelect" onchange="setCat(this.value)">
       <option value="all" id="catOptAll">🏃🚴 전체</option>
@@ -2959,14 +2933,6 @@ function setLang(l){
   if (inviteSubmitBtn && !inviteSubmitBtn.disabled)
     inviteSubmitBtn.textContent = ko ? '초대하기' : 'Invite';
 
-  // 시간 필터 버튼
-  const tfToday = document.getElementById('tfToday');
-  const tfWeek  = document.getElementById('tfWeek');
-  const tfAll   = document.getElementById('tfAll');
-  if (tfToday) tfToday.textContent = ko ? '오늘' : 'Today';
-  if (tfWeek)  tfWeek.textContent  = ko ? '이번주' : 'Week';
-  if (tfAll)   tfAll.textContent   = ko ? '전체' : 'All';
-
   // FAB 버튼
   const fabLbl = document.getElementById('fabLbl');
   if (fabLbl) fabLbl.textContent = ko ? '새 모임' : 'New';
@@ -3451,41 +3417,6 @@ function _resetAllPolylines() {
   currentSelectedId = null;
 }
 
-// ── 시간 필터 ────────────────────────────────────────────────
-const TimeFilter = {
-  current: localStorage.getItem('mf_time_filter') || 'all',
-  set(v)  { this.current = v; localStorage.setItem('mf_time_filter', v); },
-  get()   { return this.current; },
-  matches(m) {
-    if (this.current === 'all') return true;
-    const diff = m.departAt - Date.now();
-    if (this.current === 'today') return diff > 0 && diff < 864e5;
-    if (this.current === 'week')  return diff > 0 && diff < 6048e5;
-    return true;
-  }
-};
-
-function setTimeFilter(v) {
-  TimeFilter.set(v);
-  ['Today','Week','All'].forEach(k => {
-    const b = document.getElementById('tf'+k);
-    if (b) b.classList.toggle('on', k.toLowerCase() === v);
-  });
-  buildMarkers();
-}
-
-function getPulseClass(m) {
-  const diff = m.departAt - Date.now();
-  if (diff <= 0 || diff >= 6048e5) return '';
-  return diff < 864e5 ? 'pulse-fast' : 'pulse-slow';
-}
-
-function getMarkerDimmed(m) {
-  const catOk  = CatFilter.cat === 'all' || m.cat === CatFilter.cat;
-  const timeOk = TimeFilter.matches(m);
-  return !(catOk && timeOk);
-}
-
 function buildMarkers(){
   // 기존 마커 제거
   Object.values(leafletMarkers).forEach(m => MAP.removeLayer(m));
@@ -3538,18 +3469,6 @@ function buildMarkers(){
     const marker = L.marker(m.coord, { icon, zIndexOffset: zOffset, opacity: 1 })
       .addTo(MAP)
       .on('click', () => handleMarkerClick(m));
-
-    // 박동 + dimmed — setTimeout으로 DOM 렌더 보장
-    (function(mk, meeting) {
-      setTimeout(() => {
-        const el = mk.getElement();
-        if (!el) return;
-        const pulse  = getPulseClass(meeting);
-        const dimmed = getMarkerDimmed(meeting);
-        if (pulse) el.classList.add(pulse);
-        if (dimmed) el.classList.add('mf-dimmed');
-      }, 0);
-    })(marker, m);
 
     leafletMarkers[m.id] = marker;
   });
@@ -4064,13 +3983,6 @@ function onLoginSuccess(user) {
   CatFilter.cat = savedCat;
   CatFilter._updateSelectStyle();
   updateHudUnit();
-
-  // 시간 필터 버튼 상태 복원
-  const savedTf = TimeFilter.get();
-  ['Today','Week','All'].forEach(k => {
-    const b = document.getElementById('tf'+k);
-    if (b) b.classList.toggle('on', k.toLowerCase() === savedTf);
-  });
 
   // GPS
   GeoFilter.init();
