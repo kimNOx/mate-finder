@@ -4779,7 +4779,7 @@ function closeSettings() {
 }
 
 function openWithdraw() {
-  closeSettings();
+  document.getElementById('settingsOv').classList.remove('on');
   const ko = lang === 'ko';
   document.getElementById('withdrawTitle').textContent       = ko ? '정말 탈퇴하시겠어요?' : 'Delete your account?';
   document.getElementById('withdrawDesc').textContent        = ko
