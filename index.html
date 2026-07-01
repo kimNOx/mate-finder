@@ -3454,6 +3454,44 @@ function _resetAllPolylines() {
   currentSelectedId = null;
 }
 
+// ── 시간 필터 ────────────────────────────────────────────────
+const TimeFilter = {
+  current: localStorage.getItem('mf_time_filter') || 'all',
+  set(v) { this.current = v; localStorage.setItem('mf_time_filter', v); },
+  get() { return this.current; },
+  matches(m) {
+    const diff = m.departAt - Date.now();
+    if (this.current === 'today') return diff > 0 && diff < 24*60*60*1000;
+    if (this.current === 'week')  return diff > 0 && diff < 7*24*60*60*1000;
+    return true;
+  }
+};
+
+function setTimeFilter(v) {
+  TimeFilter.set(v);
+  ['Today','Week','All'].forEach(k => {
+    const btn = document.getElementById(`tf${k}`);
+    if (btn) btn.classList.toggle('on', k.toLowerCase() === v);
+  });
+  buildMarkers();
+}
+
+// ── 마커 박동 클래스 결정 ────────────────────────────────────
+function getPulseClass(m) {
+  const diff = m.departAt - Date.now();
+  if (diff <= 0) return '';
+  if (diff < 24*60*60*1000) return 'pulse-fast';
+  if (diff < 7*24*60*60*1000) return 'pulse-slow';
+  return '';
+}
+
+// ── 마커 dimmed/bright 결정 ─────────────────────────────────
+function getMarkerDimmed(m) {
+  const catOk  = CatFilter.cat === 'all' || m.cat === CatFilter.cat;
+  const timeOk = TimeFilter.matches(m);
+  return !(catOk && timeOk);
+}
+
 function buildMarkers(){
   // 기존 마커 제거
   Object.values(leafletMarkers).forEach(m => MAP.removeLayer(m));
@@ -6121,44 +6159,6 @@ function syncDeptTime() {
   document.getElementById('fDept').value = timeStr;
 }
 // 초/km → "M'SS\"/km" 표시
-// ── 시간 필터 ────────────────────────────────────────────────
-const TimeFilter = {
-  current: localStorage.getItem('mf_time_filter') || 'all',
-  set(v) { this.current = v; localStorage.setItem('mf_time_filter', v); },
-  get() { return this.current; },
-  matches(m) {
-    const diff = m.departAt - Date.now();
-    if (this.current === 'today') return diff > 0 && diff < 24*60*60*1000;
-    if (this.current === 'week')  return diff > 0 && diff < 7*24*60*60*1000;
-    return true;
-  }
-};
-
-function setTimeFilter(v) {
-  TimeFilter.set(v);
-  ['Today','Week','All'].forEach(k => {
-    const btn = document.getElementById(`tf${k}`);
-    if (btn) btn.classList.toggle('on', k.toLowerCase() === v);
-  });
-  buildMarkers();
-}
-
-// ── 마커 박동 클래스 결정 ────────────────────────────────────
-function getPulseClass(m) {
-  const diff = m.departAt - Date.now();
-  if (diff <= 0) return '';
-  if (diff < 24*60*60*1000) return 'pulse-fast';   // 오늘 출발
-  if (diff < 7*24*60*60*1000) return 'pulse-slow'; // 이번주 출발
-  return '';
-}
-
-// ── 마커 dimmed/bright 결정 ─────────────────────────────────
-function getMarkerDimmed(m) {
-  const catOk  = CatFilter.cat === 'all' || m.cat === CatFilter.cat;
-  const timeOk = TimeFilter.matches(m);
-  return !(catOk && timeOk);
-}
-
 function secToPaceStr(sec) {
   if (!sec || sec <= 0) return '—';
   const m = Math.floor(sec / 60);
