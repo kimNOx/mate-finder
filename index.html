@@ -138,7 +138,35 @@ window.doLogout = async function() {
   if (!confirm('로그아웃 하시겠어요?')) return;
   if (window._meetingsUnsub) { window._meetingsUnsub(); window._meetingsUnsub = null; }
   await signOut(fbAuth);
-  location.reload();   // 가장 깔끔한 초기화
+  location.reload();
+};
+
+// ── 회원탈퇴 ─────────────────────────────────────────────────
+window._doWithdraw = async function(password) {
+  const user = fbAuth.currentUser;
+  if (!user) throw new Error('NO_USER');
+
+  // 재인증
+  const { EmailAuthProvider, reauthenticateWithCredential, deleteUser } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+  const credential = EmailAuthProvider.credential(user.email, password);
+  await reauthenticateWithCredential(user, credential);
+
+  const uid = user.uid;
+  const { collection, query, where, getDocs, deleteDoc, doc } = window._fb;
+
+  // 1. 내가 개설한 모임 삭제
+  const myMeetings = await getDocs(query(collection(fbDb,'meetings'), where('hostUid','==',uid)));
+  await Promise.all(myMeetings.docs.map(d => deleteDoc(d.ref)));
+
+  // 2. 친구 목록 삭제
+  const friends = await getDocs(collection(fbDb,'friends',uid,'list'));
+  await Promise.all(friends.docs.map(d => deleteDoc(d.ref)));
+
+  // 3. users 문서 삭제
+  await deleteDoc(doc(fbDb,'users',uid));
+
+  // 4. Firebase Auth 계정 삭제
+  await deleteUser(user);
 };
 
 // ── 모임 저장 ────────────────────────────────────────────────
@@ -1430,7 +1458,102 @@ body.fp-open #chatPanel{right:260px;}
 .ma-chip-av{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,var(--a2),var(--accent));
   display:flex;align-items:center;justify-content:center;font-size:9px;}
 
-/* ─── 온보딩 모달 ─────────────────────────── */
+/* ─── 설정 버튼 ─────────────────────────── */
+.settings-btn{
+  background:none;border:none;
+  font-size:16px;cursor:pointer;
+  padding:4px 6px;border-radius:8px;
+  transition:background .15s;
+  pointer-events:all;
+}
+.settings-btn:hover{background:var(--s2);}
+
+/* ─── 설정 모달 ─────────────────────────── */
+.settings-ov{
+  position:fixed;inset:0;z-index:2000;
+  background:rgba(0,0,0,.6);backdrop-filter:blur(8px);
+  display:flex;align-items:flex-end;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.settings-ov.on{opacity:1;pointer-events:all;}
+.settings-modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  width:min(100%,480px);padding:20px 20px 40px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.settings-title{
+  font-family:var(--mono);font-size:13px;font-weight:800;
+  color:var(--accent);margin-bottom:8px;
+  padding-bottom:12px;border-bottom:1px solid var(--border);
+}
+.settings-item{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 12px;border-radius:12px;
+  background:none;border:none;
+  font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;transition:background .15s;
+  text-align:left;width:100%;color:var(--text);
+}
+.settings-item:hover{background:var(--s2);}
+.settings-item.danger{color:#ff4d6d;}
+.settings-item-icon{font-size:20px;width:28px;text-align:center;}
+.settings-cancel{
+  margin-top:4px;padding:13px;border-radius:12px;
+  background:var(--s2);border:none;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  color:var(--muted);cursor:pointer;width:100%;
+  transition:background .15s;
+}
+.settings-cancel:hover{background:var(--border);}
+
+/* ─── 회원탈퇴 확인 모달 ───────────────── */
+.withdraw-ov{
+  position:fixed;inset:0;z-index:2100;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+  padding:20px;
+}
+.withdraw-ov.on{opacity:1;pointer-events:all;}
+.withdraw-modal{
+  background:var(--surface);border:1px solid #ff4d6d44;
+  border-radius:20px;width:min(100%,380px);
+  padding:28px 24px;display:flex;flex-direction:column;gap:16px;
+}
+.withdraw-icon{font-size:40px;text-align:center;}
+.withdraw-title{
+  font-family:var(--mono);font-size:15px;font-weight:800;
+  color:#ff4d6d;text-align:center;
+}
+.withdraw-desc{
+  font-size:12px;color:var(--muted);text-align:center;line-height:1.6;
+}
+.withdraw-pw-label{
+  font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px;
+}
+.withdraw-pw-input{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:10px 12px;
+  font-family:var(--sans);font-size:13px;color:var(--text);
+  outline:none;box-sizing:border-box;
+}
+.withdraw-pw-input:focus{border-color:#ff4d6d;}
+.withdraw-btns{display:flex;gap:8px;}
+.withdraw-confirm-btn{
+  flex:1;padding:12px;border-radius:12px;
+  background:#ff4d6d;color:#fff;
+  font-family:var(--mono);font-size:12px;font-weight:800;
+  border:none;cursor:pointer;transition:opacity .18s;
+}
+.withdraw-confirm-btn:hover{opacity:.85;}
+.withdraw-confirm-btn:disabled{opacity:.5;cursor:not-allowed;}
+.withdraw-cancel-btn{
+  flex:1;padding:12px;border-radius:12px;
+  background:var(--s2);border:1px solid var(--border);
+  font-family:var(--mono);font-size:12px;font-weight:700;
+  color:var(--muted);cursor:pointer;
+}
 .onboard-ov{
   position:fixed;inset:0;z-index:3000;
   background:rgba(0,0,0,.85);backdrop-filter:blur(12px);
@@ -2012,6 +2135,7 @@ body.fp-open #chatPanel{right:260px;}
       <span class="manner-temp base" id="ucTemp" style="display:none">36.5°</span>
       <span class="uc-logout" id="ucLogoutLbl">로그아웃</span>
     </div>
+    <button class="settings-btn" id="settingsBtn" style="display:none" onclick="openSettings(event)">⚙️</button>
   </div>
 
   <!-- 3행: 반경 + 종목 필터 (로그인 후) -->
@@ -2063,6 +2187,37 @@ body.fp-open #chatPanel{right:260px;}
     <button class="btn-cancel" onclick="closeMannerModal()" style="width:100%;margin-top:8px">
       나중에 하기
     </button>
+  </div>
+</div>
+
+<!-- ── 설정 모달 ── -->
+<div class="settings-ov" id="settingsOv">
+  <div class="settings-modal">
+    <div class="settings-title">⚙️ <span id="settingsTitleLbl">설정</span></div>
+    <button class="settings-item danger" onclick="openWithdraw()">
+      <span class="settings-item-icon">🚪</span>
+      <span id="settingsWithdrawLbl">회원탈퇴</span>
+    </button>
+    <button class="settings-cancel" id="settingsCancelBtn" onclick="closeSettings()">닫기</button>
+  </div>
+</div>
+
+<!-- ── 회원탈퇴 확인 모달 ── -->
+<div class="withdraw-ov" id="withdrawOv">
+  <div class="withdraw-modal">
+    <div class="withdraw-icon">🚪</div>
+    <div class="withdraw-title" id="withdrawTitle">정말 탈퇴하시겠어요?</div>
+    <div class="withdraw-desc" id="withdrawDesc">탈퇴하면 모든 데이터(모임, 댓글, 친구 목록)가 삭제되며 복구할 수 없습니다.</div>
+    <div>
+      <div class="withdraw-pw-label" id="withdrawPwLabel">비밀번호 확인</div>
+      <input class="withdraw-pw-input" id="withdrawPwInput" type="password"
+             placeholder="비밀번호를 입력하세요"
+             onkeydown="if(event.key==='Enter') confirmWithdraw()">
+    </div>
+    <div class="withdraw-btns">
+      <button class="withdraw-cancel-btn" id="withdrawCancelBtn" onclick="closeWithdraw()">취소</button>
+      <button class="withdraw-confirm-btn" id="withdrawConfirmBtn" onclick="confirmWithdraw()">탈퇴하기</button>
+    </div>
   </div>
 </div>
 
@@ -2392,14 +2547,14 @@ body.fp-open #chatPanel{right:260px;}
       <textarea id="fRoute" placeholder="출발지 → 경유지 → 도착지"></textarea>
     </div>
     <div class="field">
-      <div class="field-lbl" id="fAttachLbl">📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · TCX · 사진, 선택)</span></div>
+      <div class="field-lbl" id="fAttachLbl">📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span></div>
       <div class="attach-drop" id="attachDrop"
            ondragover="event.preventDefault();this.classList.add('drag')"
            ondragleave="this.classList.remove('drag')"
            ondrop="handleAttachDrop(event)">
         <span class="attach-drop-icon">📂</span>
         <span id="attachDropTxt">여기에 파일을 끌어다 놓거나 클릭하여 선택</span>
-        <input type="file" id="fAttach" multiple accept=".gpx,.tcx,.jpg,.jpeg,.png,.webp"
+        <input type="file" id="fAttach" multiple accept=".gpx,.jpg,.jpeg,.png,.webp"
                style="position:absolute;inset:0;opacity:0;cursor:pointer"
                onchange="handleAttachSelect(this.files)">
       </div>
@@ -2765,8 +2920,8 @@ function setLang(l){
 
   const fAttachLbl = document.getElementById('fAttachLbl');
   if (fAttachLbl) fAttachLbl.innerHTML = ko
-    ? '📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · TCX · 사진, 선택)</span>'
-    : '📎 Attachment <span style="color:var(--muted);font-size:9px;">(GPX · TCX · Photo, optional)</span>';
+    ? '📎 첨부파일 <span style="color:var(--muted);font-size:9px;">(GPX · 사진, 선택)</span>'
+    : '📎 Attachment <span style="color:var(--muted);font-size:9px;">(GPX · Photo, optional)</span>';
 
   const attachDropTxt = document.getElementById('attachDropTxt');
   if (attachDropTxt) attachDropTxt.textContent = ko
@@ -3172,35 +3327,6 @@ function parseGpx(xmlStr) {
     });
     return coords;
   } catch(e) { return []; }
-}
-
-// ── TCX (Garmin Training Center XML) 파싱 ───────────────────
-// 구조: <Trackpoint><Position><LatitudeDegrees>/<LongitudeDegrees>
-function parseTcx(xmlStr) {
-  try {
-    const parser = new DOMParser();
-    const xml    = parser.parseFromString(xmlStr, 'text/xml');
-    const pts    = xml.querySelectorAll('Trackpoint');
-    const coords = [];
-    pts.forEach(pt => {
-      const posEl = pt.querySelector('Position');
-      if (!posEl) return;
-      const latEl = posEl.querySelector('LatitudeDegrees');
-      const lonEl = posEl.querySelector('LongitudeDegrees');
-      if (!latEl || !lonEl) return;
-      const lat = parseFloat(latEl.textContent);
-      const lon = parseFloat(lonEl.textContent);
-      if (isFinite(lat) && isFinite(lon)) coords.push({ lat, lng: lon });
-    });
-    return coords;
-  } catch(e) { return []; }
-}
-
-// ── 파일 확장자에 따라 GPX/TCX 자동 분기 ──────────────────────
-function parseRouteFile(text, filename) {
-  const ext = filename.toLowerCase().split('.').pop();
-  if (ext === 'tcx') return parseTcx(text);
-  return parseGpx(text);  // 기본값: gpx
 }
 
 // ── 마커/코스 클릭 분기 로직 ────────────────────────────────
@@ -3781,7 +3907,8 @@ function onLoginSuccess(user) {
   document.getElementById('authScreen').classList.add('hidden');
 
   // HUD 업데이트
-  document.getElementById('userChip').style.display = 'flex';
+  document.getElementById('userChip').style.display   = 'flex';
+  document.getElementById('settingsBtn').style.display = 'flex';
   document.getElementById('ucName').textContent = currentUser.nickname;
   const avatars = ['🏃','🚴','⚡','🌟','🔥','💨'];
   document.getElementById('ucAv').textContent = avatars[currentUser.nickname.length % avatars.length];
@@ -4054,16 +4181,13 @@ async function submitCreate() {
   const btn = document.querySelector('#createOv .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = lang==='ko'?'저장 중...':'Saving...'; }
 
-  // GPX/TCX 파일 파싱 → 좌표 배열 추출 (최대 5000포인트)
+  // GPX 파일 파싱 → 좌표 배열 추출 (최대 5000포인트)
   let gpxCoords = [];
-  const routeFile = _attachFiles.find(a => {
-    const n = a.file.name.toLowerCase();
-    return n.endsWith('.gpx') || n.endsWith('.tcx');
-  });
-  if (routeFile) {
+  const gpxFile = _attachFiles.find(a => a.file.name.toLowerCase().endsWith('.gpx'));
+  if (gpxFile) {
     try {
-      const routeText = await routeFile.file.text();
-      const raw        = parseRouteFile(routeText, routeFile.file.name);
+      const gpxText = await gpxFile.file.text();
+      const raw     = parseGpx(gpxText);
       // 포인트가 많으면 균등 샘플링
       if (raw.length > 5000) {
         const step = Math.ceil(raw.length / 5000);
@@ -4071,7 +4195,7 @@ async function submitCreate() {
       } else {
         gpxCoords  = raw;
       }
-    } catch(e) { console.warn('[Route file parse]', e); }
+    } catch(e) { console.warn('[GPX parse]', e); }
   }
 
   try {
@@ -4636,6 +4760,70 @@ async function submitInvite() {
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  설정 모달
+// ═══════════════════════════════════════════════════════════════
+function openSettings(e) {
+  if (e) e.stopPropagation();
+  const ko = lang === 'ko';
+  document.getElementById('settingsTitleLbl').textContent    = ko ? '설정' : 'Settings';
+  document.getElementById('settingsWithdrawLbl').textContent = ko ? '회원탈퇴' : 'Delete Account';
+  document.getElementById('settingsCancelBtn').textContent   = ko ? '닫기' : 'Close';
+  document.getElementById('settingsOv').classList.add('on');
+  pushPanel('settings');
+}
+
+function closeSettings() {
+  document.getElementById('settingsOv').classList.remove('on');
+  popPanel();
+}
+
+function openWithdraw() {
+  closeSettings();
+  const ko = lang === 'ko';
+  document.getElementById('withdrawTitle').textContent       = ko ? '정말 탈퇴하시겠어요?' : 'Delete your account?';
+  document.getElementById('withdrawDesc').textContent        = ko
+    ? '탈퇴하면 모든 데이터(모임, 댓글, 친구 목록)가 삭제되며 복구할 수 없습니다.'
+    : 'All your data (meetups, comments, friends) will be permanently deleted.';
+  document.getElementById('withdrawPwLabel').textContent     = ko ? '비밀번호 확인' : 'Confirm Password';
+  document.getElementById('withdrawPwInput').placeholder    = ko ? '비밀번호를 입력하세요' : 'Enter your password';
+  document.getElementById('withdrawCancelBtn').textContent   = ko ? '취소' : 'Cancel';
+  document.getElementById('withdrawConfirmBtn').textContent  = ko ? '탈퇴하기' : 'Delete Account';
+  document.getElementById('withdrawPwInput').value = '';
+  document.getElementById('withdrawOv').classList.add('on');
+  setTimeout(() => document.getElementById('withdrawPwInput').focus(), 300);
+  pushPanel('withdraw');
+}
+
+function closeWithdraw() {
+  document.getElementById('withdrawOv').classList.remove('on');
+  document.getElementById('withdrawPwInput').value = '';
+  popPanel();
+}
+
+async function confirmWithdraw() {
+  const ko  = lang === 'ko';
+  const pw  = document.getElementById('withdrawPwInput').value;
+  if (!pw) { showToast('A', ko ? '비밀번호를 입력하세요' : 'Please enter your password'); return; }
+  const btn = document.getElementById('withdrawConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = ko ? '처리 중...' : 'Processing...';
+  try {
+    await window._doWithdraw(pw);
+    alert(ko ? '탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다.' : 'Account deleted. Thank you for using mate finder.');
+    location.reload();
+  } catch(e) {
+    console.error('[withdraw]', e);
+    btn.disabled = false;
+    btn.textContent = ko ? '탈퇴하기' : 'Delete Account';
+    if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+      showToast('A', ko ? '비밀번호가 올바르지 않습니다' : 'Incorrect password');
+    } else {
+      showToast('A', ko ? '오류가 발생했습니다. 다시 시도해주세요.' : 'An error occurred. Please try again.');
+    }
+  }
+}
+
 function showOnboard() {
   const skip = localStorage.getItem('mf_onboard_skip');
   if (skip === 'true') return;
@@ -5491,6 +5679,12 @@ window.addEventListener('popstate', (e) => {
     document.getElementById('inviteModalOv').classList.remove('on');
     return;
   }
+  if (document.getElementById('withdrawOv')?.classList.contains('on')) {
+    closeWithdraw(); return;
+  }
+  if (document.getElementById('settingsOv')?.classList.contains('on')) {
+    closeSettings(); return;
+  }
   if (document.getElementById('mannerOv')?.classList.contains('on')) {
     document.getElementById('mannerOv').classList.remove('on');
     _mannerMeeting = null;
@@ -5577,9 +5771,8 @@ function _renderAttachList() {
   if (!el) return;
   if (!_attachFiles.length) { el.innerHTML = ''; return; }
   el.innerHTML = _attachFiles.map(({file, id}) => {
-    const n      = file.name.toLowerCase();
-    const isRoute = n.endsWith('.gpx') || n.endsWith('.tcx');
-    const icon   = isRoute ? '🗺️' : '🖼️';
+    const isGpx  = file.name.toLowerCase().endsWith('.gpx');
+    const icon   = isGpx ? '🗺️' : '🖼️';
     const size   = file.size < 1024*1024
       ? `${(file.size/1024).toFixed(0)}KB`
       : `${(file.size/1024/1024).toFixed(1)}MB`;
