@@ -3507,26 +3507,18 @@ function buildMarkers(){
       .addTo(MAP)
       .on('click', () => handleMarkerClick(m));
 
-    // 박동 + dimmed 클래스 적용
-    const el = marker.getElement?.();
-    if (el) {
-      const pulse  = getPulseClass(m);
-      const dimmed = getMarkerDimmed(m);
+    // 박동 + dimmed 클래스 적용 (DOM 렌더 후)
+    const _m = m;
+    const _marker = marker;
+    requestAnimationFrame(() => {
+      const el = _marker.getElement?.();
+      if (!el) return;
+      const pulse  = getPulseClass(_m);
+      const dimmed = getMarkerDimmed(_m);
+      el.classList.remove('pulse-fast','pulse-slow','dimmed','bright');
       if (pulse)  el.classList.add(pulse);
-      if (dimmed) el.classList.add('dimmed');
-      else        el.classList.add('bright');
-    } else {
-      // 마커가 아직 DOM에 없을 경우 이벤트 후 적용
-      marker.on('add', () => {
-        const e2 = marker.getElement();
-        if (!e2) return;
-        const pulse  = getPulseClass(m);
-        const dimmed = getMarkerDimmed(m);
-        if (pulse)  e2.classList.add(pulse);
-        if (dimmed) e2.classList.add('dimmed');
-        else        e2.classList.add('bright');
-      });
-    }
+      el.classList.add(dimmed ? 'dimmed' : 'bright');
+    });
 
     leafletMarkers[m.id] = marker;
   });
