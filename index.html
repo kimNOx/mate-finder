@@ -34,6 +34,7 @@
 import { initializeApp }                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, createUserWithEmailAndPassword,
          signInWithEmailAndPassword, signOut,
+         sendPasswordResetEmail,
          onAuthStateChanged, updateProfile }       from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, collection, doc, addDoc,
          setDoc, getDoc, getDocs, deleteDoc,
@@ -169,7 +170,10 @@ window._doWithdraw = async function(password) {
   await deleteUser(user);
 };
 
-// ── 모임 저장 ────────────────────────────────────────────────
+// ── 비밀번호 재설정 이메일 ───────────────────────────────────
+window._sendResetEmail = async function(email) {
+  await sendPasswordResetEmail(fbAuth, email);
+};
 window._firestoreSubmitCreate = async function(data) {
   await addDoc(collection(fbDb, 'meetings'), {
     ...data,
@@ -1981,6 +1985,13 @@ body.fp-open #chatPanel{right:260px;}
         <div class="af-msg" id="liPwMsg"></div>
       </div>
       <button class="auth-submit" id="liSubmit" onclick="doLogin()" disabled>로그인</button>
+      <div style="text-align:center;margin-top:12px;">
+        <button id="forgotPwBtn" onclick="openForgotPw()"
+          style="background:none;border:none;font-family:var(--mono);font-size:11px;
+                 color:var(--muted);cursor:pointer;text-decoration:underline;padding:4px;">
+          비밀번호를 잊으셨나요?
+        </button>
+      </div>
     </div>
 
     <!-- SIGNUP FORM -->
@@ -2243,6 +2254,35 @@ body.fp-open #chatPanel{right:260px;}
     <div class="withdraw-btns">
       <button class="withdraw-cancel-btn" id="withdrawCancelBtn" onclick="closeWithdraw()">취소</button>
       <button class="withdraw-confirm-btn" id="withdrawConfirmBtn" onclick="confirmWithdraw()">탈퇴하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 비밀번호 찾기 모달 ── -->
+<div style="position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
+     display:flex;align-items:center;justify-content:center;padding:20px;
+     opacity:0;pointer-events:none;transition:opacity .25s;" id="forgotPwOv">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:20px;
+       width:min(100%,360px);padding:28px 24px;display:flex;flex-direction:column;gap:14px;">
+    <div style="font-family:var(--mono);font-size:15px;font-weight:800;color:var(--accent);text-align:center;" id="forgotTitle">🔑 비밀번호 재설정</div>
+    <div style="font-size:12px;color:var(--muted);text-align:center;line-height:1.6;" id="forgotDesc">가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드려요.</div>
+    <div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px;" id="forgotEmailLbl">이메일</div>
+      <input id="forgotEmail" type="email" placeholder="example@email.com"
+        style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:10px;
+               padding:10px 12px;font-size:13px;color:var(--text);outline:none;box-sizing:border-box;"
+        onkeydown="if(event.key==='Enter') sendResetEmail()">
+    </div>
+    <div id="forgotMsg" style="font-family:var(--mono);font-size:11px;text-align:center;min-height:16px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeForgotPw()"
+        style="flex:1;padding:12px;border-radius:12px;background:var(--s2);
+               border:1px solid var(--border);font-family:var(--mono);font-size:12px;
+               font-weight:700;color:var(--muted);cursor:pointer;" id="forgotCancelBtn">취소</button>
+      <button onclick="sendResetEmail()" id="forgotSendBtn"
+        style="flex:1;padding:12px;border-radius:12px;background:var(--accent);
+               border:none;font-family:var(--mono);font-size:12px;font-weight:800;
+               color:#000;cursor:pointer;">전송</button>
     </div>
   </div>
 </div>
@@ -2876,6 +2916,9 @@ function setLang(l){
 
   // ── 미번역 UI 요소 일괄 처리 ─────────────────────────────────
   const ko = (l === 'ko');
+
+  const forgotPwBtn = document.getElementById('forgotPwBtn');
+  if (forgotPwBtn) forgotPwBtn.textContent = ko ? '비밀번호를 잊으셨나요?' : 'Forgot password?';
 
   // ── 로그인 화면 언어 토글 버튼 상태 동기화 ──────────────────
   document.getElementById('authBKO')?.classList.toggle('on', ko);
@@ -4815,7 +4858,65 @@ async function submitInvite() {
 
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-//  설정 모달
+//  비밀번호 찾기
+// ═══════════════════════════════════════════════════════════════
+function openForgotPw() {
+  const ko = lang === 'ko';
+  document.getElementById('forgotTitle').textContent    = ko ? '🔑 비밀번호 재설정' : '🔑 Reset Password';
+  document.getElementById('forgotDesc').textContent     = ko
+    ? '가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드려요.'
+    : 'Enter your email to receive a password reset link.';
+  document.getElementById('forgotEmailLbl').textContent = ko ? '이메일' : 'Email';
+  document.getElementById('forgotCancelBtn').textContent = ko ? '취소' : 'Cancel';
+  document.getElementById('forgotSendBtn').textContent   = ko ? '전송' : 'Send';
+  document.getElementById('forgotMsg').textContent = '';
+  document.getElementById('forgotEmail').value = '';
+  document.getElementById('forgotPwOv').style.opacity = '1';
+  document.getElementById('forgotPwOv').style.pointerEvents = 'all';
+  setTimeout(() => document.getElementById('forgotEmail').focus(), 200);
+}
+
+function closeForgotPw() {
+  document.getElementById('forgotPwOv').style.opacity = '0';
+  document.getElementById('forgotPwOv').style.pointerEvents = 'none';
+  document.getElementById('forgotMsg').textContent = '';
+}
+
+async function sendResetEmail() {
+  const ko    = lang === 'ko';
+  const email = document.getElementById('forgotEmail').value.trim();
+  const msg   = document.getElementById('forgotMsg');
+  const btn   = document.getElementById('forgotSendBtn');
+
+  if (!email) {
+    msg.style.color = '#ff4d6d';
+    msg.textContent = ko ? '이메일을 입력해주세요.' : 'Please enter your email.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = ko ? '전송 중...' : 'Sending...';
+  msg.style.color = 'var(--muted)';
+  msg.textContent = '';
+
+  try {
+    await window._sendResetEmail(email);
+    msg.style.color = 'var(--accent)';
+    msg.textContent = ko
+      ? '✓ 재설정 링크를 이메일로 보냈어요!'
+      : '✓ Reset link sent! Check your email.';
+    btn.textContent = ko ? '전송됨 ✓' : 'Sent ✓';
+    setTimeout(() => closeForgotPw(), 2500);
+  } catch(e) {
+    console.error('[resetPw]', e);
+    msg.style.color = '#ff4d6d';
+    msg.textContent = e.code === 'auth/user-not-found'
+      ? (ko ? '등록된 이메일이 없어요.' : 'Email not found.')
+      : (ko ? '오류가 발생했습니다. 다시 시도해주세요.' : 'An error occurred. Please try again.');
+    btn.disabled = false;
+    btn.textContent = ko ? '전송' : 'Send';
+  }
+}
 // ═══════════════════════════════════════════════════════════════
 function openSettings(e) {
   if (e) e.stopPropagation();
